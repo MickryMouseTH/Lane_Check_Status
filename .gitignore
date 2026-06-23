@@ -1,0 +1,28 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+
+# PyInstaller build output
+build/
+dist/
+*.manifest
+.buildenv/
+
+# Runtime data (generated at run time — should not be versioned)
+logs/
+output/
+received/
+spool/
+*_log_state.json
+
+# Backup / temp config artefacts
+*_config.json.bak
+*.tmp
+
+# Secrets / environment
+lane_check_status.env
+.env
+
+# OS junk
+.DS_Store

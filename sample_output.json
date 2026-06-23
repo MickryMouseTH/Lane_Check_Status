@@ -1,0 +1,118 @@
+{
+  "program": "Lane_Check_Status",
+  "version": "1.0.1",
+  "hostname": "ubuntu-lane-01",
+  "timestamp_utc": "2026-06-23T07:05:09.482113+00:00",
+  "timestamp_epoch": 1782630309,
+  "os": {
+    "system": "Linux",
+    "release": "6.8.0-40-generic",
+    "platform": "Linux-6.8.0-40-generic-x86_64-with-glibc2.39"
+  },
+  "cpu": {
+    "percent": 12.4,
+    "per_core_percent": [10.5, 14.2, 11.8, 13.1],
+    "core_count": 4,
+    "load_avg_1m": 0.42,
+    "load_avg_5m": 0.55,
+    "load_avg_15m": 0.61
+  },
+  "memory": {
+    "ram": {
+      "total_bytes": 16599216128,
+      "available_bytes": 11240587264,
+      "used_bytes": 4806430720,
+      "percent": 32.3
+    },
+    "swap": {
+      "total_bytes": 2147479552,
+      "used_bytes": 0,
+      "percent": 0.0
+    }
+  },
+  "disk_usage": [
+    {
+      "path": "/",
+      "total_bytes": 502921302016,
+      "used_bytes": 187304431616,
+      "free_bytes": 289998870528,
+      "percent": 39.2
+    },
+    {
+      "path": "/home",
+      "total_bytes": 1000204886016,
+      "used_bytes": 642187591680,
+      "free_bytes": 358017294336,
+      "percent": 64.2
+    },
+    {
+      "path": "/data",
+      "error": "[Errno 2] No such file or directory: '/data'"
+    }
+  ],
+  "smart": [
+    {
+      "device": "/dev/sda",
+      "model_name": "Samsung SSD 870 EVO 500GB",
+      "serial_number": "S5Y2NJ0R123456",
+      "firmware_version": "SVT02B6Q",
+      "smart_passed": true,
+      "temperature_c": 34,
+      "power_on_hours": 8421,
+      "power_cycle_count": 142,
+      "key_attributes": {
+        "Reallocated_Sector_Ct": { "value": 100, "raw": 0 },
+        "Current_Pending_Sector": { "value": 100, "raw": 0 },
+        "Wear_Leveling_Count": { "value": 96, "raw": 112 }
+      }
+    },
+    {
+      "device": "/dev/nvme0",
+      "model_name": "WD_BLACK SN770 1TB",
+      "serial_number": "23061K801234",
+      "firmware_version": "731100WD",
+      "smart_passed": true,
+      "temperature_c": 41,
+      "power_on_hours": 3120,
+      "power_cycle_count": 88,
+      "nvme_health": {
+        "percentage_used": 2,
+        "available_spare": 100,
+        "media_errors": 0,
+        "critical_warning": 0,
+        "data_units_written": 41203117
+      }
+    },
+    {
+      "device": "/dev/sdb",
+      "error": "smartctl query failed (see log)"
+    }
+  ],
+  "smart_collected_at": "2026-06-23T07:05:09.482113+00:00",
+  "program_logs": [
+    {
+      "name": "example_app",
+      "log_path_pattern": "/var/log/example_app/app.log",
+      "log_path": "/var/log/example_app/app.log",
+      "new_lines_total": 318,
+      "matched_count": 2,
+      "output_truncated": false,
+      "lines": [
+        "2026-06-23 14:04:55.120 | ERROR | worker-3 | order_service | Failed to reserve stock for order 88213: timeout",
+        "2026-06-23 14:05:01.880 | WARN  | worker-1 | payment | Retry 2/3 contacting gateway 10.0.0.42"
+      ]
+    },
+    {
+      "name": "tct_app",
+      "log_path_pattern": "/tct/yyyy-mm/tct_app_ddmmyy.log",
+      "log_path": "/tct/2026-06/tct_app_230626.log",
+      "new_lines_total": 57,
+      "matched_count": 57,
+      "output_truncated": false,
+      "lines": [
+        "2026-06-23 14:05:02 INFO  lane=3 plate=ABC-1234 status=PASS confidence=0.97",
+        "2026-06-23 14:05:04 INFO  lane=1 plate=XYZ-9911 status=PASS confidence=0.95"
+      ]
+    }
+  ]
+}

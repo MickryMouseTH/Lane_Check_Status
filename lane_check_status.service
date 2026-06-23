@@ -1,0 +1,61 @@
+[Unit]
+Description=Lane_Check_Status - Ubuntu host status collector (CPU/RAM/Disk/SMART/logs -> RabbitMQ)
+Documentation=file:/opt/lane_check_status/MEMORY.md
+# Try to start only after the network and (optionally) RabbitMQ are reachable.
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+
+# --- Paths ---
+# Drop the PyInstaller --onefile binary, the config JSON, and the logs/ + spool/
+# directories under this WorkingDirectory. The binary writes config/logs/spool
+# next to itself (LogLibrary uses the executable's directory when frozen).
+WorkingDirectory=/opt/lane_check_status
+ExecStart=/opt/lane_check_status/Lane_Check_Status
+
+# --- Secret key for LogLibrary (decrypts RabbitMQ.Password) ---
+# After the first run, copy the LOGLIB_KEY the program prints into this file:
+#   echo "LOGLIB_KEY=<key>" | sudo tee /opt/lane_check_status/lane_check_status.env
+# 0600/root so the key is not world-readable. The "-" makes it optional so the
+# service still starts before the file exists (first run).
+EnvironmentFile=-/opt/lane_check_status/lane_check_status.env
+
+# --- Privileges ---
+# smartctl needs root (or CAP_SYS_RAWIO + CAP_SYS_ADMIN) to query disks. Running
+# as root is simplest; to run unprivileged instead, see the note in README and
+# grant smartctl via sudoers/setcap, then set User=/Group= below.
+User=root
+Group=root
+
+# --- Resilience ---
+Restart=always
+RestartSec=10
+# Don't let a crash-loop hammer the box.
+StartLimitIntervalSec=300
+StartLimitBurst=10
+
+# --- Stay low-impact relative to the real workload on the host ---
+# These reinforce the in-app Nice_Level / IO_Nice_Idle settings at the OS level.
+Nice=10
+CPUWeight=20
+IOWeight=20
+# Cap memory as a safety net (adjust to taste); on overrun systemd restarts it.
+MemoryMax=256M
+
+# --- Hardening (loosen if it interferes with reading your app logs) ---
+NoNewPrivileges=true
+ProtectControlGroups=true
+ProtectKernelModules=true
+# Logs are read-only; the agent only writes under its own WorkingDirectory.
+ProtectSystem=full
+ReadWritePaths=/opt/lane_check_status
+
+# --- Journald ---
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=lane_check_status
+
+[Install]
+WantedBy=multi-user.target
