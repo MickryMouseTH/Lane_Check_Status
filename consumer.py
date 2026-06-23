@@ -29,7 +29,7 @@ except ImportError:
 
 # ----------------------- Configuration Values -----------------------
 Program_Name = "Lane_Check_Consumer"
-Program_Version = "1.0.3"
+Program_Version = "1.0.4"
 # ---------------------------------------------------------------------
 
 default_config = {

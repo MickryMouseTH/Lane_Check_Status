@@ -12,6 +12,7 @@ dist/
 # Runtime data (generated at run time — should not be versioned)
 logs/
 output/
+Output_Production/
 received/
 spool/
 *_log_state.json

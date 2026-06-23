@@ -178,8 +178,21 @@ def collect_program_logs(logger, programs, state):
         if path != path_pattern:
             logger.debug("Program '{}' log path '{}' resolved to '{}'.", name, path_pattern, path)
 
-        includes = _compile_patterns(prog.get("Include_Patterns"))
-        excludes = _compile_patterns(prog.get("Exclude_Patterns"))
+        include_raw = prog.get("Include_Patterns") or []
+        exclude_raw = prog.get("Exclude_Patterns") or []
+        # Exclude is evaluated before include, so a pattern in BOTH lists cancels
+        # itself out (every line it includes is also excluded -> 0 matches). This
+        # is a common config mistake; warn loudly so it is obvious in the log.
+        overlap = set(include_raw) & set(exclude_raw)
+        if overlap:
+            logger.warning(
+                "Program '{}': {} pattern(s) appear in BOTH Include_Patterns and "
+                "Exclude_Patterns and will NEVER match (exclude wins): {}",
+                name, len(overlap), sorted(overlap),
+            )
+
+        includes = _compile_patterns(include_raw)
+        excludes = _compile_patterns(exclude_raw)
         max_lines = int(prog.get("Max_Lines", 200))
 
         file_state = state.get(path, {})
