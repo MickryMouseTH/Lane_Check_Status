@@ -28,7 +28,7 @@ from json_archive import JsonArchive
 
 # ----------------------- Configuration Values -----------------------
 Program_Name = "Lane_Check_Status"   # Program name for identification and logging.
-Program_Version = "1.0.2"             # Program version used for file naming and logging.
+Program_Version = "1.0.3"             # Program version used for file naming and logging.
 # ---------------------------------------------------------------------
 
 default_config = {
@@ -91,6 +91,15 @@ default_config = {
         # smartctl wakes disks and does I/O, so run it less often than the main
         # loop. SMART is collected every Nth cycle; cached in between.
         "Interval_Cycles": 15,
+        # Label vendor-specific attributes that smartctl reports as
+        # "Unknown_Attribute". Keys are attribute IDs (as strings). Consult the
+        # SSD datasheet for the correct meaning of each ID on your drive.
+        "Attribute_Names": {
+            "148": "SanDisk_Vendor_148",
+            "149": "SanDisk_Vendor_149",
+            "150": "SanDisk_Vendor_150",
+            "151": "SanDisk_Vendor_151"
+        },
     },
 
     # ---- Application logs to tail & filter ----
@@ -188,6 +197,7 @@ def build_payload(logger, config, log_state, smart_cache):
                 logger,
                 smartctl_path=smart_cfg.get("Smartctl_Path", "smartctl"),
                 devices=smart_cfg.get("Devices", []),
+                attribute_names=smart_cfg.get("Attribute_Names", {}),
             )
             smart_cache["collected_at"] = now.isoformat()
         else:

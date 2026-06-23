@@ -108,6 +108,9 @@ sudo journalctl -u lane_check_status -f   # ดู log realtime
 - ชื่อ device ถูก normalize เติม `/dev/` อัตโนมัติ (เช่น `sda` → `/dev/sda`)
 - ตอน parse fail จะ log stdout/stderr จริง (snippet) เพื่อ debug; exit bit 1 (value 2) = เปิด device ไม่ได้ (มักต้อง root)
 - **ต้องรันด้วยสิทธิ์ root** ถึงจะอ่าน SMART ได้ (systemd unit รันเป็น root อยู่แล้ว)
+- เก็บ **attribute ทุกตัว** ลง `smart[].attributes[]` (id, name, value, worst, thresh, raw, raw_string, type, when_failed) + `key_attributes` เป็น highlight
+- vendor-specific ที่ smartctl โชว์ `Unknown_Attribute` (เช่น SanDisk id 148/149/150/151/164-169/245) ตั้งชื่อเองได้ผ่าน `Smart.Attribute_Names` (map "id" -> ชื่อ) ; ถ้า override ชื่อ จะเก็บชื่อเดิมไว้ที่ `smartctl_name`
+  - ⚠️ ความหมาย vendor attribute ไม่เป็นมาตรฐาน ต้องดูจาก **datasheet ผู้ผลิต** หรืออัปเดต drivedb (`sudo update-smart-drivedb` แล้ว `smartctl -x`) เพื่อชื่อที่ถูกต้อง
 
 ## TODO / ส่วนที่ยังขยายได้
 - [ ] ตัวอย่าง unit file ของ systemd

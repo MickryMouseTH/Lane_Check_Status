@@ -1,6 +1,6 @@
 {
   "program": "Lane_Check_Status",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "hostname": "ubuntu-lane-01",
   "timestamp_utc": "2026-06-23T07:05:09.482113+00:00",
   "timestamp_epoch": 1782630309,
@@ -64,7 +64,15 @@
         "Reallocated_Sector_Ct": { "value": 100, "raw": 0 },
         "Current_Pending_Sector": { "value": 100, "raw": 0 },
         "Wear_Leveling_Count": { "value": 96, "raw": 112 }
-      }
+      },
+      "attributes": [
+        { "id": 5, "name": "Reallocated_Sector_Ct", "value": 100, "worst": 100, "thresh": 10, "raw": 0, "raw_string": "0", "type": "Pre-fail", "when_failed": "-" },
+        { "id": 9, "name": "Power_On_Hours", "value": 99, "worst": 99, "thresh": 0, "raw": 8421, "raw_string": "8421", "type": "Old_age", "when_failed": "-" },
+        { "id": 12, "name": "Power_Cycle_Count", "value": 99, "worst": 99, "thresh": 0, "raw": 142, "raw_string": "142", "type": "Old_age", "when_failed": "-" },
+        { "id": 149, "name": "SanDisk_Vendor_149", "smartctl_name": "Unknown_Attribute", "value": 100, "worst": 100, "thresh": 0, "raw": 7722, "raw_string": "7722", "type": "Old_age", "when_failed": "-" },
+        { "id": 177, "name": "Wear_Leveling_Count", "value": 96, "worst": 96, "thresh": 50, "raw": 112, "raw_string": "112", "type": "Old_age", "when_failed": "-" },
+        { "id": 194, "name": "Temperature_Celsius", "value": 100, "worst": 100, "thresh": 0, "raw": 34, "raw_string": "34", "type": "Old_age", "when_failed": "-" }
+      ]
     },
     {
       "device": "/dev/nvme0",

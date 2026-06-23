@@ -111,7 +111,28 @@ def _scan_devices_json(logger, smartctl_path):
     return devices
 
 
-def _extract_summary_json(device_name, parsed):
+# ATA attribute IDs we highlight under "key_attributes" for quick triage.
+_KEY_ATTR_NAMES = (
+    "Reallocated_Sector_Ct", "Current_Pending_Sector", "Offline_Uncorrectable",
+    "Wear_Leveling_Count", "Media_Wearout_Indicator", "Percent_Lifetime_Remain",
+)
+
+
+def _resolve_attr_name(attr_id, smartctl_name, attribute_names):
+    """Return a friendly attribute name, preferring a config override by ID.
+
+    Vendor-specific attributes often show up as "Unknown_Attribute"; the config
+    map `attribute_names` (id -> name) lets operators label them per their SSD
+    datasheet.
+    """
+    if attribute_names:
+        override = attribute_names.get(str(attr_id))
+        if override:
+            return override
+    return smartctl_name
+
+
+def _extract_summary_json(device_name, parsed, attribute_names=None):
     """Pull the operationally useful fields out of a full JSON payload."""
     summary = {
         "device": device_name,
@@ -124,16 +145,34 @@ def _extract_summary_json(device_name, parsed):
     summary["power_on_hours"] = parsed.get("power_on_time", {}).get("hours")
     summary["power_cycle_count"] = parsed.get("power_cycle_count")
 
-    attributes = {}
+    # Capture EVERY attribute, applying config name overrides for vendor IDs.
+    all_attributes = []
+    key_attributes = {}
     for attr in parsed.get("ata_smart_attributes", {}).get("table", []):
-        name = attr.get("name")
-        if name in (
-            "Reallocated_Sector_Ct", "Current_Pending_Sector", "Offline_Uncorrectable",
-            "Wear_Leveling_Count", "Media_Wearout_Indicator", "Percent_Lifetime_Remain",
-        ):
-            attributes[name] = {"value": attr.get("value"), "raw": attr.get("raw", {}).get("value")}
-    if attributes:
-        summary["key_attributes"] = attributes
+        attr_id = attr.get("id")
+        smartctl_name = attr.get("name")
+        name = _resolve_attr_name(attr_id, smartctl_name, attribute_names)
+        raw = attr.get("raw", {})
+        row = {
+            "id": attr_id,
+            "name": name,
+            "value": attr.get("value"),
+            "worst": attr.get("worst"),
+            "thresh": attr.get("thresh"),
+            "raw": raw.get("value"),
+            "raw_string": raw.get("string"),
+            "when_failed": attr.get("when_failed"),
+        }
+        if name != smartctl_name:
+            row["smartctl_name"] = smartctl_name  # keep the original for reference
+        all_attributes.append(row)
+        if smartctl_name in _KEY_ATTR_NAMES:
+            key_attributes[name] = {"value": attr.get("value"), "raw": raw.get("value")}
+
+    if all_attributes:
+        summary["attributes"] = all_attributes
+    if key_attributes:
+        summary["key_attributes"] = key_attributes
 
     nvme = parsed.get("nvme_smart_health_information_log")
     if nvme:
@@ -196,7 +235,20 @@ _TEXT_PATTERNS = {
 }
 
 
-def _extract_summary_text(device_name, stdout):
+# One attribute row in the classic table. RAW_VALUE can contain spaces
+# (e.g. "59 (Min/Max 20/60)"), so the raw column is captured as the trailing rest.
+_ATTR_ROW_RE = re.compile(
+    r"^\s*(\d+)\s+(\S+)\s+(\S+)\s+(\d+)\s+(\d+)\s+(\d+)\s+(\S+)\s+(\S+)\s+(\S+)\s+(.+?)\s*$"
+)
+
+
+def _first_int(text):
+    """Return the first integer found in `text` (the numeric part of RAW_VALUE)."""
+    m = re.search(r"-?\d+", text)
+    return int(m.group(0)) if m else None
+
+
+def _extract_summary_text(device_name, stdout, attribute_names=None):
     """Parse a classic ``smartctl -a`` text report into the same summary shape."""
     summary = {"device": device_name, "model_name": None, "serial_number": None, "firmware_version": None}
 
@@ -212,26 +264,44 @@ def _extract_summary_text(device_name, stdout):
     if m:
         summary["smart_passed"] = m.group(1).upper() in ("PASSED", "OK")
 
-    # ATA attribute table rows: "  9 Power_On_Hours  0x0032 099 099 000 Old_age Always - 8421"
-    attrs = {}
+    # Walk EVERY attribute row, capturing all columns and applying name overrides.
+    all_attributes = []
+    key_attributes = {}
     for line in stdout.splitlines():
-        m = re.match(r"\s*\d+\s+(\w+)\s+0x[0-9a-fA-F]+\s+(\d+)\s+\d+\s+\d+\s+\S+\s+\S+\s+\S+\s+(\d+)", line)
+        m = _ATTR_ROW_RE.match(line)
         if not m:
             continue
-        name, value, raw = m.group(1), int(m.group(2)), int(m.group(3))
-        if name in ("Temperature_Celsius", "Airflow_Temperature_Cel"):
+        attr_id = int(m.group(1))
+        smartctl_name = m.group(2)
+        value, worst, thresh = int(m.group(4)), int(m.group(5)), int(m.group(6))
+        attr_type, when_failed = m.group(7), m.group(9)
+        raw_string = m.group(10).strip()
+        raw = _first_int(raw_string)
+
+        name = _resolve_attr_name(attr_id, smartctl_name, attribute_names)
+        row = {
+            "id": attr_id, "name": name, "value": value, "worst": worst,
+            "thresh": thresh, "raw": raw, "raw_string": raw_string,
+            "type": attr_type, "when_failed": when_failed,
+        }
+        if name != smartctl_name:
+            row["smartctl_name"] = smartctl_name
+        all_attributes.append(row)
+
+        # Headline fields from well-known attributes.
+        if smartctl_name in ("Temperature_Celsius", "Airflow_Temperature_Cel"):
             summary.setdefault("temperature_c", raw)
-        elif name == "Power_On_Hours":
+        elif smartctl_name == "Power_On_Hours":
             summary["power_on_hours"] = raw
-        elif name == "Power_Cycle_Count":
+        elif smartctl_name == "Power_Cycle_Count":
             summary["power_cycle_count"] = raw
-        elif name in (
-            "Reallocated_Sector_Ct", "Current_Pending_Sector", "Offline_Uncorrectable",
-            "Wear_Leveling_Count", "Media_Wearout_Indicator", "Percent_Lifetime_Remain",
-        ):
-            attrs[name] = {"value": value, "raw": raw}
-    if attrs:
-        summary["key_attributes"] = attrs
+        if smartctl_name in _KEY_ATTR_NAMES:
+            key_attributes[name] = {"value": value, "raw": raw}
+
+    if all_attributes:
+        summary["attributes"] = all_attributes
+    if key_attributes:
+        summary["key_attributes"] = key_attributes
 
     # Fallback temperature line: "Current Temperature: 34 Celsius"
     if "temperature_c" not in summary:
@@ -245,7 +315,7 @@ def _extract_summary_text(device_name, stdout):
 # --------------------------------------------------------------------------
 # Public entry point
 # --------------------------------------------------------------------------
-def collect_smart(logger, smartctl_path="smartctl", devices=None):
+def collect_smart(logger, smartctl_path="smartctl", devices=None, attribute_names=None):
     """Collect SMART summaries for all disks (JSON or text mode automatically).
 
     Args:
@@ -253,9 +323,13 @@ def collect_smart(logger, smartctl_path="smartctl", devices=None):
         smartctl_path: Path to / name of the smartctl binary.
         devices: Optional explicit list of device paths (e.g. ["/dev/sda"] or
                  even ["sda"] — normalised to /dev/sda). Empty/None = auto-scan.
+        attribute_names: Optional dict mapping attribute ID (as string) to a
+                 friendly name, used to label vendor-specific "Unknown_Attribute"
+                 entries per the SSD datasheet.
 
     Returns:
         list[dict]: One summary per device (or an error entry per device).
+                    Each summary includes the full `attributes` list.
     """
     logger.debug("Starting SMART collection (smartctl='{}', devices={})", smartctl_path, devices)
 
@@ -288,7 +362,7 @@ def collect_smart(logger, smartctl_path="smartctl", devices=None):
             if parsed is None:
                 results.append({"device": name, "error": "smartctl JSON query failed (see log)"})
                 continue
-            summary = _extract_summary_json(name, parsed)
+            summary = _extract_summary_json(name, parsed, attribute_names)
         else:
             stdout, rc = _run_smartctl_text(logger, smartctl_path, base_args)
             if not stdout or not stdout.strip():
@@ -297,7 +371,7 @@ def collect_smart(logger, smartctl_path="smartctl", devices=None):
             # smartctl exit bit 1 (value 2) = device open failed (e.g. permission).
             if rc is not None and (rc & 2):
                 logger.warning("smartctl could not open '{}' (exit={}); likely needs root.", name, rc)
-            summary = _extract_summary_text(name, stdout)
+            summary = _extract_summary_text(name, stdout, attribute_names)
 
         logger.debug("SMART summary for '{}': {}", name, summary)
         results.append(summary)
