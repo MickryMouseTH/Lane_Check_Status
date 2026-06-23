@@ -37,6 +37,7 @@
 | `mq_publisher.py` | RabbitMQ publish + disk spool (store-and-forward) ใช้ `pika` |
 | `json_archive.py` | เก็บสำเนา JSON เป็นไฟล์รายวัน + zip รวมรายวันตอน 00:01 + retention |
 | `consumer.py` | **ฝั่งรับ** RabbitMQ (Lane_Check_Consumer): decode JSON → log สรุป + บันทึกไฟล์, reconnect อัตโนมัติ |
+| `Server/` | **ฝั่ง Server**: รับจาก RabbitMQ → เก็บลง **MySQL** แยกตารางตามฟังก์ชัน (ดูหัวข้อ Server) |
 | `requirements.txt` | loguru, psutil, pika, cryptography, pyinstaller |
 | `Lane_Check_Status.spec` / `build.sh` | build แบบ single-file (`--onefile`) |
 | `lane_check_status.service` | systemd unit (root, low-impact, restart, hardening) |
@@ -111,6 +112,42 @@ sudo journalctl -u lane_check_status -f   # ดู log realtime
 - เก็บ **attribute ทุกตัว** ลง `smart[].attributes[]` (id, name, value, worst, thresh, raw, raw_string, type, when_failed) + `key_attributes` เป็น highlight
 - vendor-specific ที่ smartctl โชว์ `Unknown_Attribute` (เช่น SanDisk id 148/149/150/151/164-169/245) ตั้งชื่อเองได้ผ่าน `Smart.Attribute_Names` (map "id" -> ชื่อ) ; ถ้า override ชื่อ จะเก็บชื่อเดิมไว้ที่ `smartctl_name`
   - ⚠️ ความหมาย vendor attribute ไม่เป็นมาตรฐาน ต้องดูจาก **datasheet ผู้ผลิต** หรืออัปเดต drivedb (`sudo update-smart-drivedb` แล้ว `smartctl -x`) เพื่อชื่อที่ถูกต้อง
+
+## Server (RabbitMQ → MySQL) — โฟลเดอร์ `Server/`
+โปรแกรม `Lane_Check_Server` รับ payload จาก RabbitMQ แล้วเก็บลง **MySQL** โดย**แยกตารางตามแต่ละฟังก์ชัน** ทุกตารางมี PK `(timestamp_utc, hostname)` (ตารางที่มีหลายแถวต่อ host เพิ่ม discriminator)
+
+| ไฟล์ | หน้าที่ |
+|------|---------|
+| `server_consumer.py` | main: consume RabbitMQ → archive ไฟล์ + `db.store_payload()`, reconnect ทั้ง MQ และ DB, nack+requeue ถ้า DB ล่ม |
+| `db_mysql.py` | สร้าง schema อัตโนมัติ + แตก payload ลงตาราง (ใช้ `INSERT ... ON DUPLICATE KEY UPDATE`) |
+| `json_archive.py` | (copy) เก็บไฟล์ JSON ที่รับมา เป็น `.json` รายวัน + zip รายวัน + retention ; ตั้งชื่อไฟล์ตาม **hostname** ต้นทาง |
+| `manual_import.py` | **fallback เมื่อ MQ พัง**: thread เฝ้าโฟลเดอร์ `manual/` import `.json`/`.zip` เข้า MySQL (DB connection แยกของตัวเอง) |
+| `schema.sql` | สคีมาอ้างอิง (โปรแกรมสร้างเองตอนรัน) |
+| `requirements.txt` / `build.sh` | build `--onefile` (ใช้ **PyMySQL**) |
+| `lane_check_server.service` | systemd unit |
+| `LogLibrary.py` | copy มาให้ standalone |
+
+**ตาราง** (prefix ปรับได้ผ่าน `MySQL.Table_Prefix`):
+- `host` PK(timestamp_utc, hostname) — program, version, epoch, os_*
+- `cpu` PK(timestamp_utc, hostname) — percent, core_count, load_avg_*, per_core_percent(JSON)
+- `memory` PK(timestamp_utc, hostname) — ram_*_kb, ram_percent, swap_*
+- `disk_usage` PK(timestamp_utc, hostname, **path**) — total/used/free_kb, percent, error
+- `smart` PK(timestamp_utc, hostname, **device**) — model/serial/fw, smart_passed, temp, poh, error
+- `smart_attributes` PK(timestamp_utc, hostname, **device, attr_id**) — name/value/worst/thresh/raw...
+- `program_logs` PK(timestamp_utc, hostname, **name**) — path, matched_count...
+- `program_log_lines` PK(timestamp_utc, hostname, **program_name, line_no**) — line
+
+**เก็บไฟล์ JSON ที่รับ**: `Received_Files.{Enable,Directory,Retention_Days,Daily_Zip,Daily_Zip_Time}` — บันทึกทุก payload ที่รับเป็น `received/YYYY-MM-DD/<hostname>_...json` (zip รวมรายวัน + retention เหมือนฝั่ง collector) เก็บก่อนเขียน DB จึงไม่หายแม้ DB ล่ม
+
+**config** (`Lane_Check_Server_config.json` สร้างเองรอบแรก): `RabbitMQ.*` (เหมือน collector), `Received_Files.*`, `MySQL.{Host,Port,User,Password,Database,Charset,Table_Prefix,...}` — คีย์ `Password` ถูกเข้ารหัสอัตโนมัติ
+**timestamp_utc** ถูก parse จาก ISO → `DATETIME(6)` UTC (naive). ใช้ at-least-once: DB ล่ม → nack+requeue ไม่หายข้อมูล
+**Manual import (เผื่อ MQ พัง)**: `Manual_Import.{Enable,Directory,Processed_Subdir,Failed_Subdir,Scan_Interval,Min_Age_Seconds,Delete_After}` — drop ไฟล์ `.json` (รวม spool `msg_*.json`) หรือ `.zip` (เช่น daily zip ของ collector) ลง `manual/` → import เข้า DB → ย้ายไป `processed/` (สำเร็จ) หรือ `failed/` ; ทำงานเป็น thread แยก + DB connection ของตัวเอง จึง import ได้แม้ตอน RabbitMQ ล่ม ; `Min_Age_Seconds` กันอ่านไฟล์ที่ยังเขียนไม่เสร็จ
+**setup MySQL**: `CREATE DATABASE lane_check CHARACTER SET utf8mb4;` + สร้าง user/grant (ดูหัว `schema.sql`)
+
+## RabbitMQ routing (สำคัญ — เคยเป็นบั๊ก)
+- ถ้า `Exchange=""` (default/nameless exchange) RabbitMQ route ตาม **ชื่อ queue** → publisher ต้องส่งด้วย routing_key = **ชื่อ Queue** ไม่ใช่ `Routing_Key` (ถ้าใช้ `Routing_Key="system.status"` ที่ไม่ตรง queue `system_status` ข้อความจะ unroutable หายเลย)
+- `mq_publisher` แก้แล้ว: `Exchange==""` → ใช้ `Queue` เป็น routing key ; `Exchange` มีค่า → ใช้ `Routing_Key`
+- collector / consumer / server ใช้ Queue เดียวกัน = `system_status`
 
 ## TODO / ส่วนที่ยังขยายได้
 - [ ] ตัวอย่าง unit file ของ systemd

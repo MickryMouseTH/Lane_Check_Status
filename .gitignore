@@ -15,6 +15,7 @@ output/
 Output_Production/
 received/
 spool/
+manual/
 *_log_state.json
 
 # Backup / temp config artefacts

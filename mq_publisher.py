@@ -111,7 +111,14 @@ class MQPublisher:
             return False
 
         exchange = self.cfg.get("Exchange", "")
-        routing_key = self.cfg.get("Routing_Key") or self.cfg.get("Queue", "")
+        if exchange:
+            # Custom exchange: route by the configured key (or queue as fallback).
+            routing_key = self.cfg.get("Routing_Key") or self.cfg.get("Queue", "")
+        else:
+            # Default (nameless) exchange routes purely by QUEUE NAME — the
+            # routing key MUST equal the queue, otherwise the message is
+            # unroutable and never reaches the consumer.
+            routing_key = self.cfg.get("Queue", "") or self.cfg.get("Routing_Key", "")
         try:
             self._channel.basic_publish(
                 exchange=exchange,

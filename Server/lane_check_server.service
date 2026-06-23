@@ -1,0 +1,29 @@
+[Unit]
+Description=Lane_Check_Server - RabbitMQ to MySQL ingestion for Lane_Check_Status
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/lane_check_server
+ExecStart=/opt/lane_check_server/Lane_Check_Server
+
+# Secret key for LogLibrary (decrypts RabbitMQ.Password / MySQL.Password).
+# After the first run, capture the printed LOGLIB_KEY:
+#   echo "LOGLIB_KEY=<key>" | sudo tee /opt/lane_check_server/lane_check_server.env
+EnvironmentFile=-/opt/lane_check_server/lane_check_server.env
+
+User=root
+Group=root
+
+Restart=always
+RestartSec=10
+StartLimitIntervalSec=300
+StartLimitBurst=10
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=lane_check_server
+
+[Install]
+WantedBy=multi-user.target
