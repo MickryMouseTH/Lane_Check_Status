@@ -18,7 +18,9 @@ spool/
 manual/
 *_log_state.json
 
-# Backup / temp config artefacts
+# Real runtime configs — contain secrets (ENC: passwords) and host specifics.
+# Commit the *_config.template.json files instead and copy them on each host.
+*_config.json
 *_config.json.bak
 *.tmp
 

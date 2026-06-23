@@ -1,0 +1,69 @@
+{
+    "log_Level": "DEBUG",
+    "Log_Console": 1,
+    "log_Backup": 90,
+    "Log_Size": "100 MB",
+
+    "Interval_Seconds": 60,
+    "Hostname_Override": "",
+    "Nice_Level": 10,
+    "IO_Nice_Idle": 1,
+
+    "RabbitMQ": {
+        "Enable": 1,
+        "Host": "CHANGE_ME_RABBITMQ_HOST",
+        "Port": 5672,
+        "VHost": "/",
+        "Username": "guest",
+        "Password": "CHANGE_ME_ON_FIRST_RUN",
+        "Exchange": "",
+        "Routing_Key": "system.status",
+        "Queue": "system_status",
+        "Durable": 1,
+        "Connection_Timeout": 10
+    },
+
+    "Output_Files": {
+        "Enable": 1,
+        "Directory": "output",
+        "Retention_Days": 30,
+        "Daily_Zip": 1,
+        "Daily_Zip_Time": "00:01"
+    },
+
+    "Spool": {
+        "Enable": 1,
+        "Directory": "spool",
+        "Max_Files": 10000,
+        "Sweeper_Enable": 1,
+        "Flush_Interval": 30
+    },
+
+    "Disk_Paths": [
+        "/",
+        "/home"
+    ],
+
+    "Smart": {
+        "Enable": 1,
+        "Smartctl_Path": "smartctl",
+        "Devices": [],
+        "Interval_Cycles": 15,
+        "Attribute_Names": {
+            "148": "SanDisk_Vendor_148",
+            "149": "SanDisk_Vendor_149",
+            "150": "SanDisk_Vendor_150",
+            "151": "SanDisk_Vendor_151"
+        }
+    },
+
+    "Programs": [
+        {
+            "Name": "example_app",
+            "Log_Path": "/var/log/example_app/EventIO_yyyy-mm-dd.log",
+            "Include_Patterns": ["ERROR", "WARN", "CRITICAL"],
+            "Exclude_Patterns": [],
+            "Max_Lines": 200
+        }
+    ]
+}

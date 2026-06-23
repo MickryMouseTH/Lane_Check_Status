@@ -1,0 +1,49 @@
+{
+    "log_Level": "DEBUG",
+    "Log_Console": 1,
+    "log_Backup": 90,
+    "Log_Size": "100 MB",
+
+    "RabbitMQ": {
+        "Host": "CHANGE_ME_RABBITMQ_HOST",
+        "Port": 5672,
+        "VHost": "/",
+        "Username": "guest",
+        "Password": "CHANGE_ME_ON_FIRST_RUN",
+        "Queue": "system_status",
+        "Durable": 1,
+        "Prefetch": 20,
+        "Connection_Timeout": 10,
+        "Reconnect_Delay": 5
+    },
+
+    "Received_Files": {
+        "Enable": 1,
+        "Directory": "received",
+        "Retention_Days": 30,
+        "Daily_Zip": 1,
+        "Daily_Zip_Time": "00:01"
+    },
+
+    "Manual_Import": {
+        "Enable": 1,
+        "Directory": "manual",
+        "Processed_Subdir": "processed",
+        "Failed_Subdir": "failed",
+        "Scan_Interval": 30,
+        "Min_Age_Seconds": 5,
+        "Delete_After": 0
+    },
+
+    "MySQL": {
+        "Host": "CHANGE_ME_MYSQL_HOST",
+        "Port": 3306,
+        "User": "lane_check",
+        "Password": "CHANGE_ME_ON_FIRST_RUN",
+        "Database": "lane_check",
+        "Charset": "utf8mb4",
+        "Connection_Timeout": 10,
+        "Reconnect_Delay": 5,
+        "Table_Prefix": ""
+    }
+}
