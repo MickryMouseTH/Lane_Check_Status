@@ -28,7 +28,7 @@ from json_archive import JsonArchive
 
 # ----------------------- Configuration Values -----------------------
 Program_Name = "Lane_Check_Status"   # Program name for identification and logging.
-Program_Version = "1.0.1"             # Program version used for file naming and logging.
+Program_Version = "1.0.2"             # Program version used for file naming and logging.
 # ---------------------------------------------------------------------
 
 default_config = {

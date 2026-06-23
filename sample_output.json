@@ -1,6 +1,6 @@
 {
   "program": "Lane_Check_Status",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "hostname": "ubuntu-lane-01",
   "timestamp_utc": "2026-06-23T07:05:09.482113+00:00",
   "timestamp_epoch": 1782630309,
@@ -19,30 +19,30 @@
   },
   "memory": {
     "ram": {
-      "total_bytes": 16599216128,
-      "available_bytes": 11240587264,
-      "used_bytes": 4806430720,
+      "total_kb": 16210172,
+      "available_kb": 10977136,
+      "used_kb": 4693780,
       "percent": 32.3
     },
     "swap": {
-      "total_bytes": 2147479552,
-      "used_bytes": 0,
+      "total_kb": 2097148,
+      "used_kb": 0,
       "percent": 0.0
     }
   },
   "disk_usage": [
     {
       "path": "/",
-      "total_bytes": 502921302016,
-      "used_bytes": 187304431616,
-      "free_bytes": 289998870528,
+      "total_kb": 491134084,
+      "used_kb": 182914484,
+      "free_kb": 283202022,
       "percent": 39.2
     },
     {
       "path": "/home",
-      "total_bytes": 1000204886016,
-      "used_bytes": 642187591680,
-      "free_bytes": 358017294336,
+      "total_kb": 976762584,
+      "used_kb": 627136320,
+      "free_kb": 349626264,
       "percent": 64.2
     },
     {

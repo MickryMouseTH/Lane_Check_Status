@@ -15,6 +15,14 @@ def _round(value, ndigits=2):
         return value
 
 
+def _to_kb(num_bytes):
+    """Convert a byte count to kilobytes (KiB = bytes / 1024), as an integer."""
+    try:
+        return int(num_bytes) // 1024
+    except (TypeError, ValueError):
+        return num_bytes
+
+
 def collect_cpu(logger):
     """Return CPU utilisation details.
 
@@ -54,14 +62,14 @@ def collect_memory(logger):
 
     data = {
         "ram": {
-            "total_bytes": vm.total,
-            "available_bytes": vm.available,
-            "used_bytes": vm.used,
+            "total_kb": _to_kb(vm.total),
+            "available_kb": _to_kb(vm.available),
+            "used_kb": _to_kb(vm.used),
             "percent": _round(vm.percent),
         },
         "swap": {
-            "total_bytes": sm.total,
-            "used_bytes": sm.used,
+            "total_kb": _to_kb(sm.total),
+            "used_kb": _to_kb(sm.used),
             "percent": _round(sm.percent),
         },
     }
@@ -83,9 +91,9 @@ def collect_disk_usage(logger, paths):
             usage = psutil.disk_usage(path)
             entry = {
                 "path": path,
-                "total_bytes": usage.total,
-                "used_bytes": usage.used,
-                "free_bytes": usage.free,
+                "total_kb": _to_kb(usage.total),
+                "used_kb": _to_kb(usage.used),
+                "free_kb": _to_kb(usage.free),
                 "percent": _round(usage.percent),
             }
             logger.debug("Disk usage for '{}': {}", path, entry)

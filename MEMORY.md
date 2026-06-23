@@ -102,6 +102,13 @@ sudo journalctl -u lane_check_status -f   # ดู log realtime
 - secret key (`LOGLIB_KEY`) อ่านจาก `EnvironmentFile=/opt/lane_check_status/lane_check_status.env` (optional, ตั้ง 0600)
 - ติดตั้ง smartmontools: `sudo apt install smartmontools` (install_service.sh ลองติดตั้งให้อัตโนมัติ)
 
+## หมายเหตุ smartmontools (สำคัญ)
+- `-j` (JSON) มีตั้งแต่ **smartmontools 7.0**; เครื่องเก่า (เช่น Ubuntu ที่มี 6.6) ใส่ `-j` แล้วพ่น text error → parse JSON ไม่ได้ (`Expecting value: line 1 column 1`)
+- `smart_collector.py` จึง **เช็คเวอร์ชันก่อน** (`smartctl --version`): >=7 ใช้ JSON, <7 **fallback อ่าน text mode** แล้ว parse เอง (regex)
+- ชื่อ device ถูก normalize เติม `/dev/` อัตโนมัติ (เช่น `sda` → `/dev/sda`)
+- ตอน parse fail จะ log stdout/stderr จริง (snippet) เพื่อ debug; exit bit 1 (value 2) = เปิด device ไม่ได้ (มักต้อง root)
+- **ต้องรันด้วยสิทธิ์ root** ถึงจะอ่าน SMART ได้ (systemd unit รันเป็น root อยู่แล้ว)
+
 ## TODO / ส่วนที่ยังขยายได้
 - [ ] ตัวอย่าง unit file ของ systemd
 - [ ] รองรับ TLS ไป RabbitMQ (amqps)
