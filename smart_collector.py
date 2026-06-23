@@ -153,6 +153,9 @@ def _extract_summary_json(device_name, parsed, attribute_names=None):
         smartctl_name = attr.get("name")
         name = _resolve_attr_name(attr_id, smartctl_name, attribute_names)
         raw = attr.get("raw", {})
+        # Mirror the text-mode "type" column (Pre-fail / Old_age) from JSON flags.
+        flags = attr.get("flags", {}) or {}
+        attr_type = "Pre-fail" if flags.get("prefailure") else "Old_age"
         row = {
             "id": attr_id,
             "name": name,
@@ -161,6 +164,7 @@ def _extract_summary_json(device_name, parsed, attribute_names=None):
             "thresh": attr.get("thresh"),
             "raw": raw.get("value"),
             "raw_string": raw.get("string"),
+            "type": attr_type,
             "when_failed": attr.get("when_failed"),
         }
         if name != smartctl_name:

@@ -28,7 +28,7 @@ from json_archive import JsonArchive
 
 # ----------------------- Configuration Values -----------------------
 Program_Name = "Lane_Check_Status"   # Program name for identification and logging.
-Program_Version = "1.0.5"             # Program version used for file naming and logging.
+Program_Version = "1.0.6"             # Program version used for file naming and logging.
 # ---------------------------------------------------------------------
 
 default_config = {
@@ -78,6 +78,11 @@ default_config = {
         "Enable": 1,
         "Directory": "spool",           # relative to the executable/script dir.
         "Max_Files": 10000,             # oldest dropped beyond this (bounds disk use).
+        # Background sweeper: keeps retrying spooled files on its own cadence so
+        # they resend promptly once RabbitMQ recovers (independent of the
+        # collection interval).
+        "Sweeper_Enable": 1,
+        "Flush_Interval": 30,           # seconds between background sweep attempts.
     },
 
     # ---- Per-path disk usage ----
@@ -274,6 +279,11 @@ def main():
             config.get("Spool", {}),
             script_dir,
         )
+        # Start the background spool sweeper (resends spooled files when the
+        # broker recovers, independent of the collection loop).
+        spool_cfg = config.get("Spool", {})
+        if _truthy(spool_cfg.get("Sweeper_Enable", 1)):
+            publisher.start_sweeper(int(spool_cfg.get("Flush_Interval", 30)))
     else:
         publisher = None
         logger.info("RabbitMQ.Enable=0: running in archive-only mode (no MQ connection).")
@@ -298,6 +308,7 @@ def main():
         logger.info("Stop requested (Ctrl+C); shutting down.")
     finally:
         if publisher is not None:
+            publisher.stop_sweeper()
             publisher.close()
         logger.info("Lane_Check_Status stopped.")
 

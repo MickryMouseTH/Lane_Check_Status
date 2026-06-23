@@ -98,6 +98,14 @@ class ManualImporter:
             self.logger.warning("Could not list manual dir '{}': {}", self.directory, exc)
             return
 
+        # If MySQL is unreachable, leave files in place and retry next scan
+        # instead of wrongly moving valid payloads to failed/ (the manual folder
+        # is the fallback for exactly the outage scenario where the DB may also
+        # be briefly down).
+        if not self.db.connect():
+            self.logger.warning("Manual import: MySQL unreachable; deferring scan (files left in place).")
+            return
+
         now = time.time()
         for name in names:
             path = os.path.join(self.directory, name)

@@ -71,7 +71,11 @@
   - `Daily_Zip` 1/0 = เปิด/ปิด การ zip รายวัน ; `Daily_Zip_Time` = `HH:MM` ที่จะ rollup
   - rollup ทำเฉพาะโฟลเดอร์ที่ **วันที่ < วันนี้** เท่านั้น (ไม่แตะวันที่กำลังเขียนอยู่) ; เรียกทุกรอบผ่าน `archive.maintain()` ใน `run_once`
   - prune ลบ `*.zip` ของวันเก่ากว่า retention + ไฟล์/โฟลเดอร์ที่ค้าง ; เก็บ**ทุกรอบไม่ว่าจะส่ง MQ สำเร็จหรือไม่** (แยกอิสระจาก spool) ; เขียน/zip แบบ atomic
-- `Spool.{Enable,Directory,Max_Files}`
+- `Spool.{Enable,Directory,Max_Files,Sweeper_Enable,Flush_Interval}`
+  - Rabbit ล่ม → เขียนไฟล์ `spool/msg_*.json` (1 ไฟล์ = 1 message)
+  - **background sweeper thread** (`Sweeper_Enable`) คอยกวาด spool ส่งใหม่ทุก `Flush_Interval` วินาที อิสระจากรอบเก็บข้อมูล → Rabbit กลับมาปุ๊บ ส่งค้างออกทันที ไม่ต้องรอรอบถัดไป
+  - การเข้าถึง pika ทั้งหมด (publish/flush/sweeper) serialize ผ่าน `RLock` (BlockingConnection ไม่ thread-safe)
+  - spool files format = payload JSON ดิบ → เอาไป import ผ่าน `Server/manual/` ได้โดยตรงด้วย
 - `Disk_Paths` — list ของ path ที่จะวัด
 - `Smart.{Enable,Smartctl_Path,Devices,Interval_Cycles}`
 - `Programs[]` — แต่ละตัวมี `Name`, `Log_Path`, `Include_Patterns`, `Exclude_Patterns`, `Max_Lines`

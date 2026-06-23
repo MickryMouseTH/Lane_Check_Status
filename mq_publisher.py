@@ -13,6 +13,7 @@ message body. Files are deleted only after the broker confirms publication
 """
 import json
 import os
+import threading
 import time
 
 try:
@@ -40,6 +41,13 @@ class MQPublisher:
 
         self._connection = None
         self._channel = None
+
+        # The pika BlockingConnection is not thread-safe, so ALL access to it
+        # (publish / flush / connect / close) is serialised through this lock.
+        # A reentrant lock lets publish() call flush_spool() while already held.
+        self._lock = threading.RLock()
+        self._sweeper_thread = None
+        self._sweeper_stop = threading.Event()
 
         if not _HAS_PIKA:
             self.logger.error("pika is not installed; messages will only be spooled. Run: pip install pika")
@@ -149,17 +157,18 @@ class MQPublisher:
         Returns True if the new message was published immediately, False if it
         was spooled.
         """
-        # Always attempt to flush the backlog first so ordering is preserved.
-        self.flush_spool()
+        with self._lock:
+            # Always attempt to flush the backlog first so ordering is preserved.
+            self.flush_spool()
 
-        body = json.dumps(message, ensure_ascii=False).encode("utf-8")
+            body = json.dumps(message, ensure_ascii=False).encode("utf-8")
 
-        if self._publish_raw(body):
-            self.logger.info("Message published to RabbitMQ.")
-            return True
+            if self._publish_raw(body):
+                self.logger.info("Message published to RabbitMQ.")
+                return True
 
-        self._spool_message(body)
-        return False
+            self._spool_message(body)
+            return False
 
     # ------------------------------- Spool -------------------------------
     def _spool_message(self, body_bytes):
@@ -207,6 +216,11 @@ class MQPublisher:
         Stops at the first failure (broker likely down) to avoid hammering an
         unavailable broker and to keep strict ordering.
         """
+        with self._lock:
+            self._flush_spool_locked()
+
+    def _flush_spool_locked(self):
+        """Flush implementation; caller must already hold self._lock."""
         files = self._spool_files()
         if not files:
             return
@@ -233,6 +247,48 @@ class MQPublisher:
 
         if sent:
             self.logger.info("Flushed {} spooled message(s) to RabbitMQ.", sent)
+
+    # --------------------------- Background sweeper ----------------------
+    def start_sweeper(self, interval_seconds):
+        """Start a background thread that retries the spool every `interval`.
+
+        This decouples re-sending from the collection loop: once RabbitMQ comes
+        back, spooled messages drain promptly instead of waiting for the next
+        collection cycle. All broker access stays serialised via self._lock, so
+        the sweeper and the main publish path never touch the connection at the
+        same time.
+        """
+        if self._sweeper_thread is not None:
+            return
+        interval = max(2, int(interval_seconds))
+        self._sweeper_stop.clear()
+        self._sweeper_thread = threading.Thread(
+            target=self._sweeper_loop, args=(interval,), name="spool-sweeper", daemon=True
+        )
+        self._sweeper_thread.start()
+        self.logger.info("Spool sweeper started (every {}s).", interval)
+
+    def stop_sweeper(self):
+        """Stop the background sweeper thread (best effort)."""
+        self._sweeper_stop.set()
+        if self._sweeper_thread is not None:
+            self._sweeper_thread.join(timeout=5)
+            self._sweeper_thread = None
+
+    def _sweeper_loop(self, interval):
+        while not self._sweeper_stop.is_set():
+            # Sleep first so we don't double-flush right after a publish cycle.
+            for _ in range(interval):
+                if self._sweeper_stop.is_set():
+                    return
+                time.sleep(1)
+            try:
+                # Only do work when there is a backlog, to avoid needless connects.
+                if self._spool_files():
+                    self.logger.debug("Sweeper: spool backlog present; attempting flush.")
+                    self.flush_spool()
+            except Exception as exc:
+                self.logger.warning("Spool sweeper error: {}", exc)
 
 
 def _truthy(value):
