@@ -32,8 +32,18 @@ echo "[build] Cleaning previous build artifacts ..."
 rm -rf build dist
 
 echo "[build] Running PyInstaller (--onefile) ..."
+# --paths . makes PyInstaller find the local sibling modules (system_metrics,
+# smart_collector, log_collector, mq_publisher, json_archive, LogLibrary), and
+# we also name them as hidden imports so they are always bundled.
 pyinstaller --clean --noconfirm --onefile \
     --name Lane_Check_Status \
+    --paths . \
+    --hidden-import system_metrics \
+    --hidden-import smart_collector \
+    --hidden-import log_collector \
+    --hidden-import mq_publisher \
+    --hidden-import json_archive \
+    --hidden-import LogLibrary \
     --hidden-import pika \
     --hidden-import pika.adapters.blocking_connection \
     --hidden-import loguru \

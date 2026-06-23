@@ -10,10 +10,18 @@ block_cipher = None
 
 a = Analysis(
     ['main.py'],
-    pathex=[],
+    pathex=['.'],
     binaries=[],
     datas=[],
     hiddenimports=[
+        # Local sibling modules (must be bundled explicitly for --onefile).
+        'system_metrics',
+        'smart_collector',
+        'log_collector',
+        'mq_publisher',
+        'json_archive',
+        'LogLibrary',
+        # Third-party deps.
         'pika',
         'pika.adapters',
         'pika.adapters.blocking_connection',
