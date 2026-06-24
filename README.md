@@ -32,7 +32,7 @@
 | **Consumer** (client/debug) | `consumer.py` | รับจาก RabbitMQ → log summary + เซฟไฟล์ (ไว้ debug) |
 
 ### โมดูลย่อย (collector)
-`system_metrics.py` (CPU/RAM/Disk) · `smart_collector.py` (smartmontools) · `raid_collector.py` (dmraid -n) · `log_collector.py` (tail+filter+date-token) · `mq_publisher.py` (publish + spool + sweeper) · `json_archive.py` (เก็บไฟล์ JSON รายวัน+zip) · `LogLibrary.py` (config + logging + เข้ารหัส secret)
+`system_metrics.py` (CPU/RAM/Disk) · `smart_collector.py` (smartmontools) · `raid_collector.py` (dmraid -n) · `service_collector.py` (systemd units + เช็ค process ตามชื่อ) · `log_collector.py` (tail+filter+date-token) · `mq_publisher.py` (publish + spool + sweeper) · `json_archive.py` (เก็บไฟล์ JSON รายวัน+zip) · `LogLibrary.py` (config + logging + เข้ารหัส secret)
 
 ### โมดูลย่อย (server)
 `db_mysql.py` (schema + แตก payload ลงตาราง) · `json_archive.py` (เก็บไฟล์ที่รับ) · `manual_import.py` (กวาดโฟลเดอร์ → MySQL) · `LogLibrary.py`
@@ -42,13 +42,14 @@
 ## สิ่งที่เก็บ (payload JSON)
 
 ดูตัวอย่างเต็มใน [`sample_output.json`](sample_output.json) — คีย์หลัก:
-`program, version, hostname, timestamp_utc, timestamp_epoch, os, cpu, memory, disk_usage[], smart[], smart_collected_at, raid, raid_collected_at, program_logs[]`
+`program, version, hostname, timestamp_utc, timestamp_epoch, os, cpu, memory, disk_usage[], smart[], smart_collected_at, raid, raid_collected_at, services, services_collected_at, program_logs[]`
 
 - **CPU**: percent รวม + รายคอร์ + load average
 - **memory**: RAM/swap หน่วย **กิโลไบต์** (`*_kb`) + percent
 - **disk_usage[]**: ต่อ path (ตั้งได้หลาย path)
 - **smart[]**: ทุก disk — model/serial/health/temp/power-on-hours + **attributes ทุกตัว**
 - **raid**: ผล `dmraid -n` (ATARAID/fakeRAID/BIOS RAID) — `available`, `raid_detected`, `command`, `returncode`, `output[]` (เก็บห่างๆ แบบ SMART; ต้องติดตั้ง `dmraid`)
+- **services**: สุขภาพของ service/process — `systemd[]` (เช็คด้วย `systemctl show`: `active_state`/`sub_state`/`main_pid`/`ok`) และ `processes[]` (เช็คจากตาราง process ตามชื่อ/cmdline: `running`/`count`/`pids`/`rss_kb`/`uptime_seconds`/`ok`) — ทุก entry มีฟิลด์ `ok` ไว้แจ้งเตือนเร็ว
 - **program_logs[]**: log ของแต่ละโปรแกรม (กรองด้วย include/exclude regex), รองรับ date-token ในชื่อ path
 
 ---
@@ -100,6 +101,27 @@ cp Server/Lane_Check_Server_config.template.json Server/Lane_Check_Server_config
 - `Exclude_Patterns` = ตัดบรรทัดที่ match (ใช้กรอง noise)
 - **ห้ามใส่ค่าเดียวกันทั้งสองฝั่ง** (exclude ถูกเช็คก่อน → จะตัดทิ้งหมด) — โปรแกรมจะ warn ให้
 
+### ตรวจสอบ Service / Process (`Services`)
+ตรวจสุขภาพได้ 2 แบบ (เปิด/ปิดอิสระ ใส่เท่าที่ต้องการ):
+
+```jsonc
+"Services": {
+    "Enable": 1,
+    "Systemctl_Path": "systemctl",
+    "Interval_Cycles": 1,          // เช็คทุกกี่รอบ (service flap → ควรเช็คถี่; default ทุกรอบ)
+    "Timeout_Seconds": 10,
+    "Systemd_Units": ["rabbitmq-server.service", "nginx.service"],
+    "Processes": [
+        { "Name": "tps",     "Pattern": "bangkoktps.linux" },
+        { "Name": "tct_app", "Pattern": "TCT_App.exe" }
+    ]
+}
+```
+
+- **`Systemd_Units`** — เช็คด้วย `systemctl show <unit>` → healthy เมื่อ `ActiveState=active` (ใช้ได้ถ้า container รัน systemd ของตัวเอง; ถ้าไม่มี `systemctl` จะรายงาน `ok=false` ไม่ error)
+- **`Processes`** — สแกนตาราง process แล้ว match `Pattern` กับ **ชื่อ process หรือ command line** (case-insensitive substring) → เหมาะกับงานที่ **ไม่ได้คุมด้วย systemd** (เช่น binary ที่ถูกรันจาก app/shell, mono/.NET) → healthy เมื่อมีอย่างน้อย 1 instance
+  - ⚠️ ใช้ `Pattern` ที่เจาะจงพอ (เช่น `bangkoktps.linux` ไม่ใช่ `tps`) เพราะ match แบบ substring บน cmdline อาจชนกับ process อื่นที่มีสตริงนั้นใน arguments
+
 ---
 
 ## กลไกกันข้อมูลหาย
@@ -119,7 +141,8 @@ cp Server/Lane_Check_Server_config.template.json Server/Lane_Check_Server_config
 
 ```
 host · cpu · memory · disk_usage(+path) · smart(+device)
-smart_attributes(+device,attr_id) · raid · program_logs(+name) · program_log_lines(+program_name,line_no)
+smart_attributes(+device,attr_id) · raid · services_systemd(+unit) · services_process(+name)
+program_logs(+name) · program_log_lines(+program_name,line_no)
 ```
 
 เตรียม DB:

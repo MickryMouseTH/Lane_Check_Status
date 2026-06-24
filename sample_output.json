@@ -114,6 +114,51 @@
     ]
   },
   "raid_collected_at": "2026-06-23T07:05:09.482113+00:00",
+  "services": {
+    "systemd": [
+      {
+        "unit": "rabbitmq-server.service",
+        "load_state": "loaded",
+        "active_state": "active",
+        "sub_state": "running",
+        "enabled": "enabled",
+        "main_pid": 5268,
+        "ok": true
+      },
+      {
+        "unit": "nginx.service",
+        "load_state": "loaded",
+        "active_state": "failed",
+        "sub_state": "failed",
+        "enabled": "enabled",
+        "main_pid": null,
+        "ok": false
+      }
+    ],
+    "processes": [
+      {
+        "name": "bangkok_tps",
+        "pattern": "bangkoktps.linux",
+        "running": true,
+        "count": 1,
+        "pids": [5830],
+        "rss_kb": 2674048,
+        "uptime_seconds": 1814400,
+        "ok": true
+      },
+      {
+        "name": "tct_app",
+        "pattern": "TCT_App.exe",
+        "running": false,
+        "count": 0,
+        "pids": [],
+        "rss_kb": 0,
+        "uptime_seconds": null,
+        "ok": false
+      }
+    ]
+  },
+  "services_collected_at": "2026-06-23T07:05:09.482113+00:00",
   "program_logs": [
     {
       "name": "example_app",

@@ -57,6 +57,24 @@
         }
     },
 
+    "Raid": {
+        "Enable": 1,
+        "Dmraid_Path": "dmraid",
+        "Interval_Cycles": 60,
+        "Timeout_Seconds": 20
+    },
+
+    "Services": {
+        "Enable": 1,
+        "Systemctl_Path": "systemctl",
+        "Interval_Cycles": 1,
+        "Timeout_Seconds": 10,
+        "Systemd_Units": ["rabbitmq-server.service", "nginx.service"],
+        "Processes": [
+            { "Name": "example_proc", "Pattern": "example_app.linux" }
+        ]
+    },
+
     "Programs": [
         {
             "Name": "example_app",

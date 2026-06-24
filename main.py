@@ -23,13 +23,14 @@ from LogLibrary import Load_Config, Loguru_Logging, script_dir
 import system_metrics
 import smart_collector
 import raid_collector
+import service_collector
 import log_collector
 from mq_publisher import MQPublisher
 from json_archive import JsonArchive
 
 # ----------------------- Configuration Values -----------------------
 Program_Name = "Lane_Check_Status"   # Program name for identification and logging.
-Program_Version = "1.0.7"             # Program version used for file naming and logging.
+Program_Version = "1.0.8"             # Program version used for file naming and logging.
 # ---------------------------------------------------------------------
 
 default_config = {
@@ -120,6 +121,23 @@ default_config = {
         "Timeout_Seconds": 20,
     },
 
+    # ---- Service / process health checks ----
+    # Two independent checks, both optional:
+    #   Systemd_Units — queried with `systemctl show` (healthy = ActiveState=active).
+    #   Processes     — matched in the live process table by name/cmdline substring
+    #                   (for workloads that are NOT systemd units, e.g. app-launched
+    #                   or mono/.NET binaries). Healthy = at least one instance up.
+    "Services": {
+        "Enable": 1,
+        "Systemctl_Path": "systemctl",  # absolute path if not on PATH.
+        # Service state can flap, so check it more often than SMART/RAID. Default
+        # is every cycle; raise Interval_Cycles to probe less frequently.
+        "Interval_Cycles": 1,
+        "Timeout_Seconds": 10,          # per-systemctl-call timeout.
+        "Systemd_Units": [],            # e.g. ["nginx.service", "rabbitmq-server.service"]
+        "Processes": [],                # e.g. [{"Name": "tct_app", "Pattern": "TCT_App.exe"}]
+    },
+
     # ---- Application logs to tail & filter ----
     # Log_Path supports date tokens: yyyy yy mm dd HH MM SS
     #   e.g. "/tct/yyyy-mm/tct_app_ddmmyy.log" -> "/tct/2026-06/tct_app_230626.log"
@@ -181,7 +199,7 @@ def apply_low_impact(logger, config):
             logger.debug("ionice not available; skipping I/O priority tuning.")
 
 
-def build_payload(logger, config, log_state, smart_cache, raid_cache):
+def build_payload(logger, config, log_state, smart_cache, raid_cache, service_cache):
     """Collect every metric and assemble the JSON-ready payload dict."""
     hostname = config.get("Hostname_Override") or socket.gethostname()
     now = datetime.now(timezone.utc)
@@ -244,6 +262,27 @@ def build_payload(logger, config, log_state, smart_cache, raid_cache):
         logger.debug("RAID collection disabled in config.")
         payload["raid"] = {}
 
+    # 2c) Service / process health — cheap, but cached on its own cadence so it
+    #     can be throttled independently of the main loop if desired.
+    service_cfg = config.get("Services", {})
+    if _truthy(service_cfg.get("Enable", 1)):
+        if service_cache.get("due"):
+            service_cache["data"] = service_collector.collect_services(
+                logger,
+                systemctl_path=service_cfg.get("Systemctl_Path", "systemctl"),
+                systemd_units=service_cfg.get("Systemd_Units", []),
+                processes=service_cfg.get("Processes", []),
+                timeout=int(service_cfg.get("Timeout_Seconds", 10)),
+            )
+            service_cache["collected_at"] = now.isoformat()
+        else:
+            logger.debug("Service check not due this cycle; reusing cached result.")
+        payload["services"] = service_cache.get("data", {})
+        payload["services_collected_at"] = service_cache.get("collected_at")
+    else:
+        logger.debug("Service collection disabled in config.")
+        payload["services"] = {}
+
     # 3) Program logs (offset state is mutated in place)
     payload["program_logs"] = log_collector.collect_program_logs(
         logger, config.get("Programs", []), log_state
@@ -253,12 +292,12 @@ def build_payload(logger, config, log_state, smart_cache, raid_cache):
     return payload
 
 
-def run_once(logger, config, publisher, archive, log_state, log_state_path, smart_cache, raid_cache):
+def run_once(logger, config, publisher, archive, log_state, log_state_path, smart_cache, raid_cache, service_cache):
     """Execute a single collection-and-publish cycle."""
     logger.info("=== Collection cycle started ===")
     start = time.monotonic()
 
-    payload = build_payload(logger, config, log_state, smart_cache, raid_cache)
+    payload = build_payload(logger, config, log_state, smart_cache, raid_cache, service_cache)
     log_collector.save_state(logger, log_state_path, log_state)
 
     # 4a) Archive a local copy of the payload (independent of MQ delivery),
@@ -292,10 +331,12 @@ def main():
     interval = max(5, int(config.get("Interval_Seconds", 60)))
     smart_interval_cycles = max(1, int(config.get("Smart", {}).get("Interval_Cycles", 15)))
     raid_interval_cycles = max(1, int(config.get("Raid", {}).get("Interval_Cycles", 60)))
+    service_interval_cycles = max(1, int(config.get("Services", {}).get("Interval_Cycles", 1)))
     log_state_path = os.path.join(script_dir, f"{Program_Name}_log_state.json")
     log_state = log_collector.load_state(logger, log_state_path)
     smart_cache = {"data": [], "collected_at": None, "due": True}
     raid_cache = {"data": {}, "collected_at": None, "due": True}
+    service_cache = {"data": {}, "collected_at": None, "due": True}
 
     archive = JsonArchive(
         logger,
@@ -332,8 +373,10 @@ def main():
             smart_cache["due"] = (cycle % smart_interval_cycles == 0)
             # RAID metadata is static-ish; refresh it on its own (slower) cadence.
             raid_cache["due"] = (cycle % raid_interval_cycles == 0)
+            # Service health flaps; refresh on its own (usually faster) cadence.
+            service_cache["due"] = (cycle % service_interval_cycles == 0)
             try:
-                run_once(logger, config, publisher, archive, log_state, log_state_path, smart_cache, raid_cache)
+                run_once(logger, config, publisher, archive, log_state, log_state_path, smart_cache, raid_cache, service_cache)
             except Exception as exc:
                 # One bad cycle must not kill the daemon.
                 logger.exception("Unhandled error during collection cycle: {}", exc)

@@ -18,6 +18,7 @@ a = Analysis(
         'system_metrics',
         'smart_collector',
         'raid_collector',
+        'service_collector',
         'log_collector',
         'mq_publisher',
         'json_archive',

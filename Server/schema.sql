@@ -108,6 +108,37 @@ CREATE TABLE IF NOT EXISTS `raid` (
     PRIMARY KEY (timestamp_utc, hostname)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
+-- systemd unit health -> one row per unit per cycle.
+CREATE TABLE IF NOT EXISTS `services_systemd` (
+    timestamp_utc DATETIME(6)  NOT NULL,
+    hostname      VARCHAR(150) NOT NULL,
+    unit          VARCHAR(200) NOT NULL,
+    load_state    VARCHAR(40),
+    active_state  VARCHAR(40),
+    sub_state     VARCHAR(40),
+    enabled       VARCHAR(40),
+    main_pid      BIGINT,
+    ok            TINYINT,
+    error         VARCHAR(255),
+    PRIMARY KEY (timestamp_utc, hostname, unit)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- Named (non-systemd) process health -> one row per spec name per cycle.
+CREATE TABLE IF NOT EXISTS `services_process` (
+    timestamp_utc  DATETIME(6)  NOT NULL,
+    hostname       VARCHAR(150) NOT NULL,
+    name           VARCHAR(150) NOT NULL,
+    pattern        VARCHAR(255),
+    running        TINYINT,
+    count          INT,
+    pids           JSON,
+    rss_kb         BIGINT,
+    uptime_seconds BIGINT,
+    ok             TINYINT,
+    error          VARCHAR(255),
+    PRIMARY KEY (timestamp_utc, hostname, name)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
 -- One row per monitored program per cycle.
 CREATE TABLE IF NOT EXISTS `program_logs` (
     timestamp_utc    DATETIME(6)  NOT NULL,

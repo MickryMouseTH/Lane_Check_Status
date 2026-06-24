@@ -13,6 +13,8 @@ Tables (with optional Table_Prefix):
     disk_usage          (PK: timestamp_utc, hostname, path)
     smart               (PK: timestamp_utc, hostname, device)
     smart_attributes    (PK: timestamp_utc, hostname, device, attr_id)
+    services_systemd    (PK: timestamp_utc, hostname, unit)
+    services_process    (PK: timestamp_utc, hostname, name)
     program_logs        (PK: timestamp_utc, hostname, name)
     program_log_lines   (PK: timestamp_utc, hostname, program_name, line_no)
 
@@ -207,6 +209,35 @@ class Database:
                 PRIMARY KEY (timestamp_utc, hostname)
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4""",
 
+            f"""CREATE TABLE IF NOT EXISTS {self._t('services_systemd')} (
+                timestamp_utc  DATETIME(6)  NOT NULL,
+                hostname       VARCHAR(150) NOT NULL,
+                unit           VARCHAR(200) NOT NULL,
+                load_state     VARCHAR(40),
+                active_state   VARCHAR(40),
+                sub_state      VARCHAR(40),
+                enabled        VARCHAR(40),
+                main_pid       BIGINT,
+                ok             TINYINT,
+                error          VARCHAR(255),
+                PRIMARY KEY (timestamp_utc, hostname, unit)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4""",
+
+            f"""CREATE TABLE IF NOT EXISTS {self._t('services_process')} (
+                timestamp_utc  DATETIME(6)  NOT NULL,
+                hostname       VARCHAR(150) NOT NULL,
+                name           VARCHAR(150) NOT NULL,
+                pattern        VARCHAR(255),
+                running        TINYINT,
+                count          INT,
+                pids           JSON,
+                rss_kb         BIGINT,
+                uptime_seconds BIGINT,
+                ok             TINYINT,
+                error          VARCHAR(255),
+                PRIMARY KEY (timestamp_utc, hostname, name)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4""",
+
             f"""CREATE TABLE IF NOT EXISTS {self._t('program_logs')} (
                 timestamp_utc     DATETIME(6)  NOT NULL,
                 hostname          VARCHAR(150) NOT NULL,
@@ -278,6 +309,7 @@ class Database:
                 self._store_smart(cur, ts, host, payload.get("smart", []) or [])
                 self._store_raid(cur, ts, host, payload.get("raid", {}) or {},
                                  payload.get("raid_collected_at"))
+                self._store_services(cur, ts, host, payload.get("services", {}) or {})
                 self._store_program_logs(cur, ts, host, payload.get("program_logs", []) or [])
             self._conn.commit()
             self.logger.info("Stored payload for {} @ {} into MySQL.", host, ts.isoformat())
@@ -369,6 +401,33 @@ class Database:
              raid.get("returncode"),
              json.dumps(output) if output is not None else None,
              raid.get("stderr"), raid.get("error"), collected_at])
+
+    def _store_services(self, cur, ts, host, services):
+        if not services:
+            return
+        for s in services.get("systemd", []) or []:
+            unit = s.get("unit")
+            if not unit:
+                continue
+            self._upsert(cur, "services_systemd",
+                ["timestamp_utc", "hostname", "unit", "load_state", "active_state",
+                 "sub_state", "enabled", "main_pid", "ok", "error"],
+                [ts, host, unit, s.get("load_state"), s.get("active_state"),
+                 s.get("sub_state"), s.get("enabled"), s.get("main_pid"),
+                 self._bool_int(s.get("ok")), s.get("error")])
+
+        for p in services.get("processes", []) or []:
+            name = p.get("name")
+            if not name:
+                continue
+            pids = p.get("pids")
+            self._upsert(cur, "services_process",
+                ["timestamp_utc", "hostname", "name", "pattern", "running", "count",
+                 "pids", "rss_kb", "uptime_seconds", "ok", "error"],
+                [ts, host, name, p.get("pattern"), self._bool_int(p.get("running")),
+                 p.get("count"), json.dumps(pids) if pids is not None else None,
+                 p.get("rss_kb"), p.get("uptime_seconds"),
+                 self._bool_int(p.get("ok")), p.get("error")])
 
     def _store_program_logs(self, cur, ts, host, programs):
         for p in programs:
