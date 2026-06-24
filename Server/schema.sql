@@ -133,6 +133,8 @@ CREATE TABLE IF NOT EXISTS `services_process` (
     count          INT,
     pids           JSON,
     rss_kb         BIGINT,
+    vms_kb         BIGINT,
+    num_threads    INT,
     uptime_seconds BIGINT,
     ok             TINYINT,
     error          VARCHAR(255),

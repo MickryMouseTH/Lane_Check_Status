@@ -122,13 +122,15 @@ def _match_processes(logger, specs):
             "count": 0,
             "pids": [],
             "rss_kb": 0,
+            "vms_kb": 0,
+            "num_threads": 0,
             "uptime_seconds": None,
         }
         results.append(entry)
         spec_state.append(pattern.lower())
 
     now = time.time()
-    for proc in psutil.process_iter(["pid", "name", "cmdline", "memory_info", "create_time"]):
+    for proc in psutil.process_iter(["pid", "name", "cmdline", "memory_info", "num_threads", "create_time"]):
         try:
             info = proc.info
             pname = (info.get("name") or "").lower()
@@ -146,7 +148,14 @@ def _match_processes(logger, specs):
                 entry["pids"].append(info.get("pid"))
                 mem = info.get("memory_info")
                 if mem is not None:
+                    # RSS = resident (physical); VMS = virtual address space. A
+                    # thread/fd leak shows up in VMS + num_threads long before RSS,
+                    # so we capture all three to make leaks observable over time.
                     entry["rss_kb"] += int(getattr(mem, "rss", 0)) // 1024
+                    entry["vms_kb"] += int(getattr(mem, "vms", 0)) // 1024
+                nthreads = info.get("num_threads")
+                if nthreads:
+                    entry["num_threads"] += int(nthreads)
                 # Track the oldest matching instance's uptime (most representative).
                 ctime = info.get("create_time")
                 if ctime:

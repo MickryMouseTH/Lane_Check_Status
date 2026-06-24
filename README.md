@@ -49,7 +49,7 @@
 - **disk_usage[]**: ต่อ path (ตั้งได้หลาย path)
 - **smart[]**: ทุก disk — model/serial/health/temp/power-on-hours + **attributes ทุกตัว**
 - **raid**: ผล `dmraid -n` (ATARAID/fakeRAID/BIOS RAID) — `available`, `raid_detected`, `command`, `returncode`, `output[]` (เก็บห่างๆ แบบ SMART; ต้องติดตั้ง `dmraid`)
-- **services**: สุขภาพของ service/process — `systemd[]` (เช็คด้วย `systemctl show`: `active_state`/`sub_state`/`main_pid`/`ok`) และ `processes[]` (เช็คจากตาราง process ตามชื่อ/cmdline: `running`/`count`/`pids`/`rss_kb`/`uptime_seconds`/`ok`) — ทุก entry มีฟิลด์ `ok` ไว้แจ้งเตือนเร็ว
+- **services**: สุขภาพของ service/process — `systemd[]` (เช็คด้วย `systemctl show`: `active_state`/`sub_state`/`main_pid`/`ok`) และ `processes[]` (เช็คจากตาราง process ตามชื่อ/cmdline: `running`/`count`/`pids`/`rss_kb`/`vms_kb`/`num_threads`/`uptime_seconds`/`ok`) — ทุก entry มีฟิลด์ `ok` ไว้แจ้งเตือนเร็ว; `vms_kb` + `num_threads` ที่โตเรื่อยๆ ใช้จับ memory/thread leak ได้
 - **program_logs[]**: log ของแต่ละโปรแกรม (กรองด้วย include/exclude regex), รองรับ date-token ในชื่อ path
 
 ---

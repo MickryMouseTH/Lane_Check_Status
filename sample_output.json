@@ -143,7 +143,21 @@
         "count": 1,
         "pids": [5830],
         "rss_kb": 2674048,
+        "vms_kb": 5276972,
+        "num_threads": 45,
         "uptime_seconds": 1814400,
+        "ok": true
+      },
+      {
+        "name": "lcsd_agent",
+        "pattern": "/usr/local/bin/lcsd",
+        "running": true,
+        "count": 1,
+        "pids": [3275],
+        "rss_kb": 28068,
+        "vms_kb": 10490280,
+        "num_threads": 1107,
+        "uptime_seconds": 4300000,
         "ok": true
       },
       {
@@ -153,6 +167,8 @@
         "count": 0,
         "pids": [],
         "rss_kb": 0,
+        "vms_kb": 0,
+        "num_threads": 0,
         "uptime_seconds": null,
         "ok": false
       }

@@ -232,6 +232,8 @@ class Database:
                 count          INT,
                 pids           JSON,
                 rss_kb         BIGINT,
+                vms_kb         BIGINT,
+                num_threads    INT,
                 uptime_seconds BIGINT,
                 ok             TINYINT,
                 error          VARCHAR(255),
@@ -423,11 +425,11 @@ class Database:
             pids = p.get("pids")
             self._upsert(cur, "services_process",
                 ["timestamp_utc", "hostname", "name", "pattern", "running", "count",
-                 "pids", "rss_kb", "uptime_seconds", "ok", "error"],
+                 "pids", "rss_kb", "vms_kb", "num_threads", "uptime_seconds", "ok", "error"],
                 [ts, host, name, p.get("pattern"), self._bool_int(p.get("running")),
                  p.get("count"), json.dumps(pids) if pids is not None else None,
-                 p.get("rss_kb"), p.get("uptime_seconds"),
-                 self._bool_int(p.get("ok")), p.get("error")])
+                 p.get("rss_kb"), p.get("vms_kb"), p.get("num_threads"),
+                 p.get("uptime_seconds"), self._bool_int(p.get("ok")), p.get("error")])
 
     def _store_program_logs(self, cur, ts, host, programs):
         for p in programs:
