@@ -22,13 +22,14 @@ from LogLibrary import Load_Config, Loguru_Logging, script_dir
 
 import system_metrics
 import smart_collector
+import raid_collector
 import log_collector
 from mq_publisher import MQPublisher
 from json_archive import JsonArchive
 
 # ----------------------- Configuration Values -----------------------
 Program_Name = "Lane_Check_Status"   # Program name for identification and logging.
-Program_Version = "1.0.6"             # Program version used for file naming and logging.
+Program_Version = "1.0.7"             # Program version used for file naming and logging.
 # ---------------------------------------------------------------------
 
 default_config = {
@@ -107,6 +108,18 @@ default_config = {
         },
     },
 
+    # ---- RAID metadata (dmraid -n) ----
+    # Captures ATARAID / fakeRAID / BIOS RAID on-disk metadata. Requires root
+    # (the service runs as root) and the `dmraid` package installed.
+    "Raid": {
+        "Enable": 1,
+        "Dmraid_Path": "dmraid",        # absolute path if not on PATH.
+        # RAID config is essentially static; probe it infrequently and cache
+        # the result between refreshes (like SMART).
+        "Interval_Cycles": 60,
+        "Timeout_Seconds": 20,
+    },
+
     # ---- Application logs to tail & filter ----
     # Log_Path supports date tokens: yyyy yy mm dd HH MM SS
     #   e.g. "/tct/yyyy-mm/tct_app_ddmmyy.log" -> "/tct/2026-06/tct_app_230626.log"
@@ -168,7 +181,7 @@ def apply_low_impact(logger, config):
             logger.debug("ionice not available; skipping I/O priority tuning.")
 
 
-def build_payload(logger, config, log_state, smart_cache):
+def build_payload(logger, config, log_state, smart_cache, raid_cache):
     """Collect every metric and assemble the JSON-ready payload dict."""
     hostname = config.get("Hostname_Override") or socket.gethostname()
     now = datetime.now(timezone.utc)
@@ -213,6 +226,24 @@ def build_payload(logger, config, log_state, smart_cache):
         logger.debug("SMART collection disabled in config.")
         payload["smart"] = []
 
+    # 2b) RAID metadata (dmraid -n) — static-ish, cached like SMART.
+    raid_cfg = config.get("Raid", {})
+    if _truthy(raid_cfg.get("Enable", 1)):
+        if raid_cache.get("due"):
+            raid_cache["data"] = raid_collector.collect_raid(
+                logger,
+                dmraid_path=raid_cfg.get("Dmraid_Path", "dmraid"),
+                timeout=int(raid_cfg.get("Timeout_Seconds", 20)),
+            )
+            raid_cache["collected_at"] = now.isoformat()
+        else:
+            logger.debug("RAID not due this cycle; reusing cached result.")
+        payload["raid"] = raid_cache.get("data", {})
+        payload["raid_collected_at"] = raid_cache.get("collected_at")
+    else:
+        logger.debug("RAID collection disabled in config.")
+        payload["raid"] = {}
+
     # 3) Program logs (offset state is mutated in place)
     payload["program_logs"] = log_collector.collect_program_logs(
         logger, config.get("Programs", []), log_state
@@ -222,12 +253,12 @@ def build_payload(logger, config, log_state, smart_cache):
     return payload
 
 
-def run_once(logger, config, publisher, archive, log_state, log_state_path, smart_cache):
+def run_once(logger, config, publisher, archive, log_state, log_state_path, smart_cache, raid_cache):
     """Execute a single collection-and-publish cycle."""
     logger.info("=== Collection cycle started ===")
     start = time.monotonic()
 
-    payload = build_payload(logger, config, log_state, smart_cache)
+    payload = build_payload(logger, config, log_state, smart_cache, raid_cache)
     log_collector.save_state(logger, log_state_path, log_state)
 
     # 4a) Archive a local copy of the payload (independent of MQ delivery),
@@ -260,9 +291,11 @@ def main():
 
     interval = max(5, int(config.get("Interval_Seconds", 60)))
     smart_interval_cycles = max(1, int(config.get("Smart", {}).get("Interval_Cycles", 15)))
+    raid_interval_cycles = max(1, int(config.get("Raid", {}).get("Interval_Cycles", 60)))
     log_state_path = os.path.join(script_dir, f"{Program_Name}_log_state.json")
     log_state = log_collector.load_state(logger, log_state_path)
     smart_cache = {"data": [], "collected_at": None, "due": True}
+    raid_cache = {"data": {}, "collected_at": None, "due": True}
 
     archive = JsonArchive(
         logger,
@@ -297,8 +330,10 @@ def main():
         while True:
             # SMART is due on the first cycle and every Nth cycle thereafter.
             smart_cache["due"] = (cycle % smart_interval_cycles == 0)
+            # RAID metadata is static-ish; refresh it on its own (slower) cadence.
+            raid_cache["due"] = (cycle % raid_interval_cycles == 0)
             try:
-                run_once(logger, config, publisher, archive, log_state, log_state_path, smart_cache)
+                run_once(logger, config, publisher, archive, log_state, log_state_path, smart_cache, raid_cache)
             except Exception as exc:
                 # One bad cycle must not kill the daemon.
                 logger.exception("Unhandled error during collection cycle: {}", exc)

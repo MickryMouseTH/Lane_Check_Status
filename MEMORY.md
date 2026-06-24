@@ -33,6 +33,7 @@
 | `main.py` | orchestrator: loop เก็บค่า → ประกอบ JSON → ส่ง, จัดการ low-impact, SMART caching |
 | `system_metrics.py` | CPU / RAM / Disk usage (ใช้ `psutil`) |
 | `smart_collector.py` | smartmontools ทุก disk (`smartctl -j`, scan + per-device summary) |
+| `raid_collector.py` | RAID metadata ผ่าน `dmraid -n` (ATARAID/fakeRAID/BIOS RAID), cache แบบเดียวกับ SMART |
 | `log_collector.py` | tail+filter log ของแต่ละโปรแกรม, offset state, **date-token ในชื่อ path** |
 | `mq_publisher.py` | RabbitMQ publish + disk spool (store-and-forward) ใช้ `pika` |
 | `json_archive.py` | เก็บสำเนา JSON เป็นไฟล์รายวัน + zip รวมรายวันตอน 00:01 + retention |
@@ -83,8 +84,9 @@
 
 ## รูปแบบ JSON ที่ส่ง
 ดูตัวอย่างเต็มใน `sample_output.json`. คีย์หลัก:
-`program, version, hostname, timestamp_utc, timestamp_epoch, os, cpu, memory, disk_usage[], smart[], smart_collected_at, program_logs[]`
+`program, version, hostname, timestamp_utc, timestamp_epoch, os, cpu, memory, disk_usage[], smart[], smart_collected_at, raid, raid_collected_at, program_logs[]`
 - ค่าที่อ่านไม่ได้ (เช่น path หาย / smartctl fail) จะใส่ฟิลด์ `error` ราย item แทนที่จะล้มทั้งรอบ
+- `raid` = ผล `dmraid -n`: `available`, `raid_detected`, `command`, `returncode`, `output[]` (+ `stderr`/`error` เมื่อมี); ไม่มี `dmraid` → `available=false` เฉยๆ ไม่ error
 - `program_logs[]` มี `log_path_pattern` (ดิบ) และ `log_path` (หลังแทนวันที่), `matched_count`, `lines[]`
 
 ## การ build
@@ -106,6 +108,7 @@ sudo journalctl -u lane_check_status -f   # ดู log realtime
 - `lane_check_status.service` มี low-impact ระดับ OS แล้ว: `Nice=10`, `CPUWeight=20`, `IOWeight=20`, `MemoryMax=256M` + hardening (`ProtectSystem=full`, log อ่าน read-only)
 - secret key (`LOGLIB_KEY`) อ่านจาก `EnvironmentFile=/opt/lane_check_status/lane_check_status.env` (optional, ตั้ง 0600)
 - ติดตั้ง smartmontools: `sudo apt install smartmontools` (install_service.sh ลองติดตั้งให้อัตโนมัติ)
+- ติดตั้ง dmraid (ออปชัน, สำหรับ RAID metadata): `sudo apt install dmraid` — ถ้าไม่มี ฟิลด์ `raid.available=false` ไม่ถือเป็น error
 
 ## หมายเหตุ smartmontools (สำคัญ)
 - `-j` (JSON) มีตั้งแต่ **smartmontools 7.0**; เครื่องเก่า (เช่น Ubuntu ที่มี 6.6) ใส่ `-j` แล้วพ่น text error → parse JSON ไม่ได้ (`Expecting value: line 1 column 1`)
@@ -116,6 +119,12 @@ sudo journalctl -u lane_check_status -f   # ดู log realtime
 - เก็บ **attribute ทุกตัว** ลง `smart[].attributes[]` (id, name, value, worst, thresh, raw, raw_string, type, when_failed) + `key_attributes` เป็น highlight
 - vendor-specific ที่ smartctl โชว์ `Unknown_Attribute` (เช่น SanDisk id 148/149/150/151/164-169/245) ตั้งชื่อเองได้ผ่าน `Smart.Attribute_Names` (map "id" -> ชื่อ) ; ถ้า override ชื่อ จะเก็บชื่อเดิมไว้ที่ `smartctl_name`
   - ⚠️ ความหมาย vendor attribute ไม่เป็นมาตรฐาน ต้องดูจาก **datasheet ผู้ผลิต** หรืออัปเดต drivedb (`sudo update-smart-drivedb` แล้ว `smartctl -x`) เพื่อชื่อที่ถูกต้อง
+
+## หมายเหตุ dmraid / RAID (`raid_collector.py`)
+- เก็บ on-disk RAID metadata ด้วย `dmraid -n` (`--native_log`) — ATARAID/fakeRAID/BIOS RAID (ไม่ใช่ mdadm software RAID)
+- เรียก `dmraid` ตรงๆ ไม่ใช้ `sudo` (service รันเป็น root อยู่แล้ว เหมือน smartctl/ionice) — config `Raid.Dmraid_Path` ตั้ง path เองได้
+- cache แบบเดียวกับ SMART: `Raid.Interval_Cycles` (default 60 รอบ) เพราะ RAID config แทบไม่เปลี่ยน → ไม่ต้องรันทุกรอบ
+- ไม่มี `dmraid` หรือ "no raid disks" (dmraid exit non-zero) → ถือว่า `raid_detected=false` ไม่ใช่ error; ทุก failure ถูกเก็บใน dict ไม่ทำให้รอบเก็บล้ม
 
 ## Server (RabbitMQ → MySQL) — โฟลเดอร์ `Server/`
 โปรแกรม `Lane_Check_Server` รับ payload จาก RabbitMQ แล้วเก็บลง **MySQL** โดย**แยกตารางตามแต่ละฟังก์ชัน** ทุกตารางมี PK `(timestamp_utc, hostname)` (ตารางที่มีหลายแถวต่อ host เพิ่ม discriminator)
@@ -138,6 +147,7 @@ sudo journalctl -u lane_check_status -f   # ดู log realtime
 - `disk_usage` PK(timestamp_utc, hostname, **path**) — total/used/free_kb, percent, error
 - `smart` PK(timestamp_utc, hostname, **device**) — model/serial/fw, smart_passed, temp, poh, error
 - `smart_attributes` PK(timestamp_utc, hostname, **device, attr_id**) — name/value/worst/thresh/raw...
+- `raid` PK(timestamp_utc, hostname) — available, raid_detected, command, returncode, output(JSON), stderr, error, collected_at
 - `program_logs` PK(timestamp_utc, hostname, **name**) — path, matched_count...
 - `program_log_lines` PK(timestamp_utc, hostname, **program_name, line_no**) — line
 

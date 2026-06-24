@@ -17,6 +17,7 @@ a = Analysis(
         # Local sibling modules (must be bundled explicitly for --onefile).
         'system_metrics',
         'smart_collector',
+        'raid_collector',
         'log_collector',
         'mq_publisher',
         'json_archive',

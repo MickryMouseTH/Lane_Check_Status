@@ -32,7 +32,7 @@
 | **Consumer** (client/debug) | `consumer.py` | รับจาก RabbitMQ → log summary + เซฟไฟล์ (ไว้ debug) |
 
 ### โมดูลย่อย (collector)
-`system_metrics.py` (CPU/RAM/Disk) · `smart_collector.py` (smartmontools) · `log_collector.py` (tail+filter+date-token) · `mq_publisher.py` (publish + spool + sweeper) · `json_archive.py` (เก็บไฟล์ JSON รายวัน+zip) · `LogLibrary.py` (config + logging + เข้ารหัส secret)
+`system_metrics.py` (CPU/RAM/Disk) · `smart_collector.py` (smartmontools) · `raid_collector.py` (dmraid -n) · `log_collector.py` (tail+filter+date-token) · `mq_publisher.py` (publish + spool + sweeper) · `json_archive.py` (เก็บไฟล์ JSON รายวัน+zip) · `LogLibrary.py` (config + logging + เข้ารหัส secret)
 
 ### โมดูลย่อย (server)
 `db_mysql.py` (schema + แตก payload ลงตาราง) · `json_archive.py` (เก็บไฟล์ที่รับ) · `manual_import.py` (กวาดโฟลเดอร์ → MySQL) · `LogLibrary.py`
@@ -42,12 +42,13 @@
 ## สิ่งที่เก็บ (payload JSON)
 
 ดูตัวอย่างเต็มใน [`sample_output.json`](sample_output.json) — คีย์หลัก:
-`program, version, hostname, timestamp_utc, timestamp_epoch, os, cpu, memory, disk_usage[], smart[], smart_collected_at, program_logs[]`
+`program, version, hostname, timestamp_utc, timestamp_epoch, os, cpu, memory, disk_usage[], smart[], smart_collected_at, raid, raid_collected_at, program_logs[]`
 
 - **CPU**: percent รวม + รายคอร์ + load average
 - **memory**: RAM/swap หน่วย **กิโลไบต์** (`*_kb`) + percent
 - **disk_usage[]**: ต่อ path (ตั้งได้หลาย path)
 - **smart[]**: ทุก disk — model/serial/health/temp/power-on-hours + **attributes ทุกตัว**
+- **raid**: ผล `dmraid -n` (ATARAID/fakeRAID/BIOS RAID) — `available`, `raid_detected`, `command`, `returncode`, `output[]` (เก็บห่างๆ แบบ SMART; ต้องติดตั้ง `dmraid`)
 - **program_logs[]**: log ของแต่ละโปรแกรม (กรองด้วย include/exclude regex), รองรับ date-token ในชื่อ path
 
 ---
@@ -70,7 +71,7 @@ cd Server
 sudo ./install_service.sh       # ติดตั้ง (/opt/lane_check_server)
 ```
 
-ต้องติดตั้ง smartmontools บนเครื่อง collector: `sudo apt install smartmontools` (อ่าน SMART ต้องสิทธิ์ root → service รันเป็น root)
+ต้องติดตั้ง smartmontools บนเครื่อง collector: `sudo apt install smartmontools` (อ่าน SMART ต้องสิทธิ์ root → service รันเป็น root) — และติดตั้ง `dmraid` หากต้องการเก็บ RAID metadata: `sudo apt install dmraid` (ถ้าไม่มี `dmraid` ฟิลด์ `raid` จะรายงาน `available=false` เฉยๆ ไม่ error)
 
 ---
 
@@ -118,7 +119,7 @@ cp Server/Lane_Check_Server_config.template.json Server/Lane_Check_Server_config
 
 ```
 host · cpu · memory · disk_usage(+path) · smart(+device)
-smart_attributes(+device,attr_id) · program_logs(+name) · program_log_lines(+program_name,line_no)
+smart_attributes(+device,attr_id) · raid · program_logs(+name) · program_log_lines(+program_name,line_no)
 ```
 
 เตรียม DB:
@@ -156,7 +157,7 @@ log ละเอียดอยู่ใน `logs/` (rotate ตามขนา�
 
 ```
 Lane_Check_Status/
-├── main.py, system_metrics.py, smart_collector.py, log_collector.py
+├── main.py, system_metrics.py, smart_collector.py, raid_collector.py, log_collector.py
 ├── mq_publisher.py, json_archive.py, consumer.py, LogLibrary.py
 ├── *_config.template.json            # คัดลอกเป็น *_config.json (ของจริงไม่ commit)
 ├── build.sh, install_service.sh, *.spec, *.service, requirements.txt

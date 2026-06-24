@@ -1,6 +1,6 @@
 {
   "program": "Lane_Check_Status",
-  "version": "1.0.6",
+  "version": "1.0.7",
   "hostname": "ubuntu-lane-01",
   "timestamp_utc": "2026-06-23T07:05:09.482113+00:00",
   "timestamp_epoch": 1782630309,
@@ -97,6 +97,23 @@
     }
   ],
   "smart_collected_at": "2026-06-23T07:05:09.482113+00:00",
+  "raid": {
+    "available": true,
+    "raid_detected": true,
+    "command": "dmraid -n",
+    "returncode": 0,
+    "output": [
+      "/dev/sda (isw):",
+      "0x000 sig: \"        Intel Raid ISM Cfg Sig. 1.2.02\"",
+      "0x020 check_sum: 2864434397",
+      "0x024 mpb_size: 480",
+      "0x028 family_num: 1681929045",
+      "0x030 num_disks: 2",
+      "0x031 num_raid_devs: 1",
+      "raid set \"isw_raid_Volume0\": level 1, 2 disks, state OK"
+    ]
+  },
+  "raid_collected_at": "2026-06-23T07:05:09.482113+00:00",
   "program_logs": [
     {
       "name": "example_app",

@@ -193,6 +193,20 @@ class Database:
                 PRIMARY KEY (timestamp_utc, hostname, device, attr_id)
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4""",
 
+            f"""CREATE TABLE IF NOT EXISTS {self._t('raid')} (
+                timestamp_utc  DATETIME(6)  NOT NULL,
+                hostname       VARCHAR(150) NOT NULL,
+                available      TINYINT,
+                raid_detected  TINYINT,
+                command        VARCHAR(255),
+                returncode     INT,
+                output         JSON,
+                stderr         VARCHAR(2000),
+                error          VARCHAR(255),
+                collected_at   VARCHAR(40),
+                PRIMARY KEY (timestamp_utc, hostname)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4""",
+
             f"""CREATE TABLE IF NOT EXISTS {self._t('program_logs')} (
                 timestamp_utc     DATETIME(6)  NOT NULL,
                 hostname          VARCHAR(150) NOT NULL,
@@ -262,6 +276,8 @@ class Database:
                 self._store_memory(cur, ts, host, payload.get("memory", {}) or {})
                 self._store_disks(cur, ts, host, payload.get("disk_usage", []) or [])
                 self._store_smart(cur, ts, host, payload.get("smart", []) or [])
+                self._store_raid(cur, ts, host, payload.get("raid", {}) or {},
+                                 payload.get("raid_collected_at"))
                 self._store_program_logs(cur, ts, host, payload.get("program_logs", []) or [])
             self._conn.commit()
             self.logger.info("Stored payload for {} @ {} into MySQL.", host, ts.isoformat())
@@ -340,6 +356,19 @@ class Database:
                     [ts, host, device, attr_id, attr.get("name"), attr.get("value"),
                      attr.get("worst"), attr.get("thresh"), attr.get("raw"),
                      attr.get("raw_string"), attr.get("type"), attr.get("when_failed")])
+
+    def _store_raid(self, cur, ts, host, raid, collected_at):
+        if not raid:
+            return
+        output = raid.get("output")
+        self._upsert(cur, "raid",
+            ["timestamp_utc", "hostname", "available", "raid_detected", "command",
+             "returncode", "output", "stderr", "error", "collected_at"],
+            [ts, host, self._bool_int(raid.get("available")),
+             self._bool_int(raid.get("raid_detected")), raid.get("command"),
+             raid.get("returncode"),
+             json.dumps(output) if output is not None else None,
+             raid.get("stderr"), raid.get("error"), collected_at])
 
     def _store_program_logs(self, cur, ts, host, programs):
         for p in programs:

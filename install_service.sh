@@ -8,7 +8,7 @@
 # enables it on boot, and starts it.
 set -euo pipefail
 
-INSTALL_DIR="/opt/lane_check_status"
+INSTALL_DIR="/home/lane_check_status"
 SERVICE_NAME="lane_check_status.service"
 SRC_DIR="$(cd "$(dirname "$0")" && pwd)"
 
@@ -40,8 +40,56 @@ if [ -f "$SRC_DIR/Lane_Check_Status_config.json" ] && [ ! -f "$INSTALL_DIR/Lane_
     install -m 0644 "$SRC_DIR/Lane_Check_Status_config.json" "$INSTALL_DIR/"
 fi
 
-echo "[install] Installing systemd unit ..."
-install -m 0644 "$SRC_DIR/$SERVICE_NAME" "/etc/systemd/system/$SERVICE_NAME"
+echo "[install] Installing systemd unit (pointing it at $INSTALL_DIR) ..."
+# Generate the unit inline so the deploy bundle only needs the dist binary
+# (no separate .service file to copy). Paths point at $INSTALL_DIR.
+cat > "/etc/systemd/system/$SERVICE_NAME" <<EOF
+[Unit]
+Description=Lane_Check_Status - Ubuntu host status collector (CPU/RAM/Disk/SMART/logs -> RabbitMQ)
+Documentation=file:$INSTALL_DIR/MEMORY.md
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+
+WorkingDirectory=$INSTALL_DIR
+ExecStart=$INSTALL_DIR/Lane_Check_Status
+
+# Secret key for LogLibrary (decrypts RabbitMQ.Password). After the first run:
+#   echo "LOGLIB_KEY=<key>" | sudo tee $INSTALL_DIR/lane_check_status.env
+EnvironmentFile=-$INSTALL_DIR/lane_check_status.env
+
+# smartctl needs root to query disks.
+User=root
+Group=root
+
+Restart=always
+RestartSec=10
+StartLimitIntervalSec=300
+StartLimitBurst=10
+
+# Stay low-impact relative to the real workload on the host.
+Nice=10
+CPUWeight=20
+IOWeight=20
+MemoryMax=256M
+
+# Hardening (loosen if it interferes with reading your app logs).
+NoNewPrivileges=true
+ProtectControlGroups=true
+ProtectKernelModules=true
+ProtectSystem=full
+ReadWritePaths=$INSTALL_DIR
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=lane_check_status
+
+[Install]
+WantedBy=multi-user.target
+EOF
+chmod 0644 "/etc/systemd/system/$SERVICE_NAME"
 
 systemctl daemon-reload
 systemctl enable "$SERVICE_NAME"

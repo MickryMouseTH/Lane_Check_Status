@@ -40,6 +40,7 @@ pyinstaller --clean --noconfirm --onefile \
     --paths . \
     --hidden-import system_metrics \
     --hidden-import smart_collector \
+    --hidden-import raid_collector \
     --hidden-import log_collector \
     --hidden-import mq_publisher \
     --hidden-import json_archive \

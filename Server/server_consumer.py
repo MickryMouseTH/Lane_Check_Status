@@ -34,7 +34,7 @@ except ImportError:
 
 # ----------------------- Configuration Values -----------------------
 Program_Name = "Lane_Check_Server"
-Program_Version = "1.0.6"
+Program_Version = "1.0.7"
 # ---------------------------------------------------------------------
 
 default_config = {

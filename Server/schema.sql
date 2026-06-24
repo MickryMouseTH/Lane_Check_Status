@@ -93,6 +93,21 @@ CREATE TABLE IF NOT EXISTS `smart_attributes` (
     PRIMARY KEY (timestamp_utc, hostname, device, attr_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
+-- RAID metadata from `dmraid -n` -> one row per host per cycle.
+CREATE TABLE IF NOT EXISTS `raid` (
+    timestamp_utc DATETIME(6)  NOT NULL,
+    hostname      VARCHAR(150) NOT NULL,
+    available     TINYINT,
+    raid_detected TINYINT,
+    command       VARCHAR(255),
+    returncode    INT,
+    output        JSON,
+    stderr        VARCHAR(2000),
+    error         VARCHAR(255),
+    collected_at  VARCHAR(40),
+    PRIMARY KEY (timestamp_utc, hostname)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
 -- One row per monitored program per cycle.
 CREATE TABLE IF NOT EXISTS `program_logs` (
     timestamp_utc    DATETIME(6)  NOT NULL,
