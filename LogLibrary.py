@@ -43,10 +43,14 @@ logger = Loguru_Logging(config, Program_Name, Program_Version)
 #   secret. On the FIRST run you set it as plaintext; the library then encrypts it
 #   in the JSON file (value becomes "ENC:..."). At runtime `config[...]` always
 #   holds the decrypted plaintext for your program to use.
-# - Encryption uses the `cryptography` package (pip install cryptography) with a
-#   key read from the LOGLIB_KEY environment variable. If LOGLIB_KEY is not set,
-#   a key is generated and printed once — export it so secrets stay readable:
-#       export LOGLIB_KEY=<printed key>
+# - Encryption uses the `cryptography` package (pip install cryptography). The
+#   key is created automatically on the first run and saved to a key file named
+#   after the program (`<Program_Name>.key`) next to the config; every later run
+#   reuses it, so secrets stay readable with no manual setup. Keep that .key
+#   file safe and backed up — losing it makes encrypted secrets unrecoverable.
+# - To share one key across machines (or override the file), set the LOGLIB_KEY
+#   environment variable; it takes precedence over the key file:
+#       export LOGLIB_KEY=<key>
 ----------------------------------------------------------------------------------------------------------------------------------------
 '''
 global script_dir
@@ -85,6 +89,36 @@ def _write_config(config_path, config):
     os.replace(tmp_path, config_path)
 
 
+def _write_key_file(key_path, key_bytes):
+    """Atomically write the Fernet key to `key_path` with owner-only perms.
+
+    Written via a temp file + os.replace so an interrupted write never leaves a
+    truncated key behind. The 0600 mode keeps the key readable only by the
+    owner (best effort; silently skipped on filesystems without POSIX perms).
+    Returns True on success.
+    """
+    tmp_path = f'{key_path}.tmp'
+    try:
+        with open(tmp_path, 'wb') as key_file:
+            key_file.write(key_bytes)
+            key_file.flush()
+            os.fsync(key_file.fileno())
+        os.replace(tmp_path, key_path)
+        try:
+            os.chmod(key_path, 0o600)
+        except OSError:
+            pass  # non-POSIX filesystem; restrictive perms are best effort.
+        return True
+    except OSError as exc:
+        sys.stderr.write(f'[LogLibrary] Failed to write key file "{key_path}" ({exc}).\n')
+        try:
+            if os.path.exists(tmp_path):
+                os.remove(tmp_path)
+        except OSError:
+            pass
+        return False
+
+
 def _is_secret_key(key_name):
     """Return True if `key_name` looks like a secret (contains "pass")."""
     return 'pass' in str(key_name).lower()
@@ -103,14 +137,22 @@ def _config_has_secret(obj):
     return False
 
 
-def _resolve_fernet():
+def _resolve_fernet(key_path):
     """Return (Fernet, generated_flag).
 
-    Uses the key in the `LOGLIB_KEY` env var when present. Otherwise generates
-    a fresh key and signals the caller (generated_flag=True) so it can tell the
-    operator to persist it; without persistence, secrets cannot be decrypted on
-    the next run.
+    Key resolution order:
+    1. The `LOGLIB_KEY` environment variable, if set — an explicit operator
+       override that also lets one key be shared across machines.
+    2. A persistent key file next to the program (`<Program_Name>.key`). It is
+       created automatically on the FIRST run and reused on every run after,
+       so encrypted secrets stay readable without any manual setup.
+
+    `generated_flag` is True only when a brand-new key had to be created AND it
+    could not be persisted to the key file (e.g. a read-only directory); the
+    caller then warns that secrets won't survive a restart. When the key is
+    loaded from — or successfully saved to — the key file, the flag is False.
     """
+    # 1. Environment variable wins (explicit override / shared key).
     key = os.environ.get(_KEY_ENV)
     if key:
         try:
@@ -118,9 +160,38 @@ def _resolve_fernet():
         except (ValueError, TypeError) as exc:
             sys.stderr.write(
                 f'[LogLibrary] Invalid {_KEY_ENV} value ({exc}); '
-                f'generating a temporary key.\n'
+                f'falling back to the key file.\n'
             )
-    return Fernet(Fernet.generate_key()), True
+
+    # 2. Persistent key file beside the program — reused across runs.
+    if key_path and os.path.exists(key_path):
+        try:
+            with open(key_path, 'rb') as key_file:
+                stored = key_file.read().strip()
+            if stored:
+                return Fernet(stored), False
+            sys.stderr.write(
+                f'[LogLibrary] Key file "{key_path}" is empty; generating a new key.\n'
+            )
+        except (OSError, ValueError, TypeError) as exc:
+            sys.stderr.write(
+                f'[LogLibrary] Could not use key file "{key_path}" ({exc}); '
+                f'generating a new key.\n'
+            )
+
+    # 3. First run (or unusable key file): generate a key and persist it so the
+    #    NEXT run finds the same key here and can decrypt today's secrets.
+    new_key = Fernet.generate_key()
+    if key_path and _write_key_file(key_path, new_key):
+        sys.stderr.write(
+            f'[LogLibrary] Generated a new encryption key and saved it to '
+            f'"{key_path}". Keep this file safe and backed up; if it is lost, '
+            f'encrypted secrets cannot be recovered.\n'
+        )
+        return Fernet(new_key), False
+
+    # Could not persist the key — secrets will not survive a restart.
+    return Fernet(new_key), True
 
 
 def _process_secrets(obj, fernet):
@@ -167,7 +238,7 @@ def _process_secrets(obj, fernet):
     return obj, obj, False
 
 
-def _apply_secret_encryption(config, config_path, force_write):
+def _apply_secret_encryption(config, config_path, force_write, key_path):
     """Encrypt plaintext secrets / decrypt stored secrets.
 
     Returns the runtime config (with plaintext secret values). Rewrites the
@@ -179,6 +250,7 @@ def _apply_secret_encryption(config, config_path, force_write):
         config_path: Path to the JSON config file.
         force_write: When True, (re)write the file even if no plaintext secret
             needed encrypting (used when creating a brand-new config file).
+        key_path: Path to the persistent Fernet key file for this program.
     """
     if not _config_has_secret(config):
         return config
@@ -190,7 +262,7 @@ def _apply_secret_encryption(config, config_path, force_write):
         )
         return config
 
-    fernet, generated = _resolve_fernet()
+    fernet, generated = _resolve_fernet(key_path)
     runtime_config, disk_config, changed = _process_secrets(config, fernet)
 
     if changed or force_write:
@@ -202,11 +274,14 @@ def _apply_secret_encryption(config, config_path, force_write):
             )
 
     if changed and generated:
-        # Print the generated key so the operator can persist it; otherwise the
-        # next run generates a different key and decryption will fail.
+        # Reached only when the key could NOT be persisted to the key file
+        # (e.g. read-only directory). Print the key so the operator can save it
+        # via LOGLIB_KEY; otherwise the next run generates a different key and
+        # decryption will fail.
         sys.stderr.write(
-            '[LogLibrary] Secrets encrypted with a NEW generated key. '
-            'To keep them readable on the next run, set this in your environment:\n'
+            '[LogLibrary] Secrets encrypted with a NEW key that could not be '
+            'saved to the key file. To keep them readable on the next run, set '
+            'this in your environment:\n'
             f'{_generated_key_hint(fernet)}'
         )
 
@@ -244,13 +319,16 @@ def Load_Config(default_config, Program_Name):
     safe_name = Program_Name if Program_Name else 'app'
     config_file_name = f'{safe_name}_config.json'
     config_path = os.path.join(script_dir, config_file_name)
+    # Persistent Fernet key file, named after the program; created on first run
+    # and reused on every run after so secrets stay decryptable automatically.
+    key_path = os.path.join(script_dir, f'{safe_name}.key')
 
     # Create config file with default values if it does not exist.
     if not os.path.exists(config_path):
         # Persist defaults so operators can edit them later. Encrypt any secret
         # values up front so the new file never lands plaintext on disk.
         _write_config(config_path, default_config)
-        return _apply_secret_encryption(dict(default_config), config_path, force_write=True)
+        return _apply_secret_encryption(dict(default_config), config_path, force_write=True, key_path=key_path)
 
     # Load configuration, tolerating a missing/corrupt file.
     try:
@@ -270,7 +348,7 @@ def Load_Config(default_config, Program_Name):
                 os.replace(config_path, f'{config_path}.bak')
         except OSError:
             pass
-        return _apply_secret_encryption(dict(default_config), config_path, force_write=True)
+        return _apply_secret_encryption(dict(default_config), config_path, force_write=True, key_path=key_path)
 
     # Merge file values over the defaults so missing keys are backfilled.
     config = dict(default_config)
@@ -278,7 +356,7 @@ def Load_Config(default_config, Program_Name):
 
     # Encrypt any plaintext secrets (first run) / decrypt stored secrets so the
     # application always receives usable plaintext values.
-    return _apply_secret_encryption(config, config_path, force_write=False)
+    return _apply_secret_encryption(config, config_path, force_write=False, key_path=key_path)
 
 # ----------------------- Loguru Logging Setup -----------------------
 def Loguru_Logging(config, Program_Name, Program_Version):
