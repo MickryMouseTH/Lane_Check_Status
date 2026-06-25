@@ -43,8 +43,18 @@ def collect_raid(logger, dmraid_path="dmraid", timeout=20):
 
     cmd = [resolved, "-n"]
     try:
+        # dmraid -n dumps raw on-disk native metadata that is NOT valid UTF-8
+        # (it contains arbitrary binary bytes, e.g. 0xb0). Decode tolerantly so
+        # an undecodable byte cannot raise UnicodeDecodeError and abort the
+        # whole collection cycle.
         proc = subprocess.run(
-            cmd, capture_output=True, text=True, timeout=timeout, check=False
+            cmd,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=timeout,
+            check=False,
         )
     except (OSError, subprocess.TimeoutExpired) as exc:
         logger.warning("dmraid execution failed: {}", exc)
