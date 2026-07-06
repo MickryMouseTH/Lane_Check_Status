@@ -97,7 +97,7 @@ default_config = {
     # Keeps the database bounded. Prunes every per-cycle table by timestamp_utc.
     "Retention": {
         "Enable": 1,
-        "Retention_Days": 30,          # delete DB rows older than this (0 = keep forever).
+        "Retention_Days": 7,           # delete DB rows older than this (0 = keep forever).
         "Cleanup_Interval_Hours": 24,  # how often to run the purge.
         "Run_On_Startup": 1,           # 1 = purge once at startup, then on interval.
     },

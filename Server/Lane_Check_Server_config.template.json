@@ -49,7 +49,7 @@
 
     "Retention": {
         "Enable": 1,
-        "Retention_Days": 30,
+        "Retention_Days": 7,
         "Cleanup_Interval_Hours": 24,
         "Run_On_Startup": 1
     }

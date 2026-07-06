@@ -28,7 +28,7 @@ class RetentionCleaner:
         self.logger = logger
         self.cfg = retention_config or {}
         self.enabled = _truthy(self.cfg.get("Enable", 0))
-        self.retention_days = int(self.cfg.get("Retention_Days", 30) or 0)
+        self.retention_days = int(self.cfg.get("Retention_Days", 7) or 0)
         # How often to run the purge (hours -> seconds; min 1 hour).
         self.interval_seconds = max(1, int(self.cfg.get("Cleanup_Interval_Hours", 24))) * 3600
         self.run_on_startup = _truthy(self.cfg.get("Run_On_Startup", 1))

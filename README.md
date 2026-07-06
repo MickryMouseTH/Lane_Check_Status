@@ -224,12 +224,12 @@ FLUSH PRIVILEGES;
 ```
 
 ### ลบข้อมูลเก่าอัตโนมัติ (DB retention)
-Server มี thread เบื้องหลัง (`db_cleanup.py`) คอยลบแถวที่ `timestamp_utc` เก่าเกิน `Retention_Days` ออกจาก **ทุกตาราง** เพื่อไม่ให้ DB โตไม่จำกัด (ค่า default = 30 วัน)
+Server มี thread เบื้องหลัง (`db_cleanup.py`) คอยลบแถวที่ `timestamp_utc` เก่าเกิน `Retention_Days` ออกจาก **ทุกตาราง** เพื่อไม่ให้ DB โตไม่จำกัด (ค่า default = 7 วัน)
 
 ```jsonc
 "Retention": {
     "Enable": 1,
-    "Retention_Days": 30,          // ลบแถวที่เก่ากว่านี้ (0 = เก็บถาวร ไม่ลบ)
+    "Retention_Days": 7,           // ลบแถวที่เก่ากว่านี้ (0 = เก็บถาวร ไม่ลบ)
     "Cleanup_Interval_Hours": 24,  // รอบการกวาดลบ (ทุกกี่ชั่วโมง)
     "Run_On_Startup": 1            // 1 = กวาดครั้งแรกทันทีตอนสตาร์ท แล้วค่อยวนตาม interval
 }
