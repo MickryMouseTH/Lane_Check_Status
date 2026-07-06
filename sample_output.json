@@ -1,6 +1,6 @@
 {
   "program": "Lane_Check_Status",
-  "version": "1.0.6",
+  "version": "1.3.0",
   "hostname": "ubuntu-lane-01",
   "timestamp_utc": "2026-06-23T07:05:09.482113+00:00",
   "timestamp_epoch": 1782630309,
@@ -97,6 +97,171 @@
     }
   ],
   "smart_collected_at": "2026-06-23T07:05:09.482113+00:00",
+  "raid": {
+    "available": true,
+    "raid_detected": true,
+    "command": "dmraid -n",
+    "returncode": 0,
+    "output": [
+      "/dev/sda (isw):",
+      "0x000 sig: \"        Intel Raid ISM Cfg Sig. 1.2.02\"",
+      "0x020 check_sum: 2864434397",
+      "0x024 mpb_size: 480",
+      "0x028 family_num: 1681929045",
+      "0x030 num_disks: 2",
+      "0x031 num_raid_devs: 1",
+      "raid set \"isw_raid_Volume0\": level 1, 2 disks, state OK"
+    ]
+  },
+  "raid_collected_at": "2026-06-23T07:05:09.482113+00:00",
+  "services": {
+    "systemd": [
+      {
+        "unit": "rabbitmq-server.service",
+        "load_state": "loaded",
+        "active_state": "active",
+        "sub_state": "running",
+        "enabled": "enabled",
+        "main_pid": 5268,
+        "ok": true
+      },
+      {
+        "unit": "nginx.service",
+        "load_state": "loaded",
+        "active_state": "failed",
+        "sub_state": "failed",
+        "enabled": "enabled",
+        "main_pid": null,
+        "ok": false
+      }
+    ],
+    "processes": [
+      {
+        "name": "bangkok_tps",
+        "pattern": "bangkoktps.linux",
+        "running": true,
+        "count": 1,
+        "pids": [5830],
+        "rss_kb": 2674048,
+        "vms_kb": 5276972,
+        "num_threads": 45,
+        "uptime_seconds": 1814400,
+        "ok": true
+      },
+      {
+        "name": "lcsd_agent",
+        "pattern": "/usr/local/bin/lcsd",
+        "running": true,
+        "count": 1,
+        "pids": [3275],
+        "rss_kb": 28068,
+        "vms_kb": 10490280,
+        "num_threads": 1107,
+        "uptime_seconds": 4300000,
+        "ok": true
+      },
+      {
+        "name": "tct_app",
+        "pattern": "TCT_App.exe",
+        "running": false,
+        "count": 0,
+        "pids": [],
+        "rss_kb": 0,
+        "vms_kb": 0,
+        "num_threads": 0,
+        "uptime_seconds": null,
+        "ok": false
+      }
+    ]
+  },
+  "services_collected_at": "2026-06-23T07:05:09.482113+00:00",
+  "ping": [
+    {
+      "hostname": "Gateway",
+      "address": "192.168.1.1",
+      "reachable": true,
+      "rtt_ms": 0.482,
+      "packet_loss_percent": 0.0,
+      "ok": true
+    },
+    {
+      "hostname": "Google DNS",
+      "address": "8.8.8.8",
+      "reachable": true,
+      "rtt_ms": 12.7,
+      "packet_loss_percent": 0.0,
+      "ok": true
+    },
+    {
+      "hostname": "TPS Server",
+      "address": "10.0.0.42",
+      "reachable": false,
+      "rtt_ms": null,
+      "packet_loss_percent": 100.0,
+      "ok": false
+    }
+  ],
+  "ping_collected_at": "2026-06-23T07:05:09.482113+00:00",
+  "usb": [
+    {
+      "name": "NFC Reader (SL600)",
+      "vendor_id": "0471",
+      "product_id": "a112",
+      "present": true,
+      "count": 1,
+      "manufacturer": "HighTech Reader Co. Ltd.",
+      "product": "SL600-NFC Reader",
+      "serial": "HTR3310000000000",
+      "ok": true
+    },
+    {
+      "name": "Receipt Printer (EPSON TM-T88VI)",
+      "vendor_id": "04b8",
+      "product_id": "0202",
+      "present": true,
+      "count": 1,
+      "manufacturer": "EPSON",
+      "product": "TM-T88VI",
+      "serial": "583658430024590000",
+      "ok": true
+    },
+    {
+      "name": "Barcode Scanner",
+      "vendor_id": "05e0",
+      "product_id": "1200",
+      "present": false,
+      "count": 0,
+      "manufacturer": null,
+      "product": null,
+      "serial": null,
+      "ok": false
+    }
+  ],
+  "usb_collected_at": "2026-06-23T07:05:09.482113+00:00",
+  "http_probe": [
+    {
+      "name": "RSE651 mra242",
+      "url": "http://10.0.0.15:1337",
+      "ok": true,
+      "status_code": 200,
+      "response_ms": 43.6,
+      "fields": {
+        "serial_number": "RSE1003032",
+        "mac": "00:12:8e:04:2f:db",
+        "host": "mra242"
+      }
+    },
+    {
+      "name": "RSE651 lane-2",
+      "url": "http://10.0.0.16:1337",
+      "ok": false,
+      "status_code": null,
+      "response_ms": 10002.1,
+      "fields": {},
+      "error": "timed out"
+    }
+  ],
+  "http_probe_collected_at": "2026-06-23T07:05:09.482113+00:00",
   "program_logs": [
     {
       "name": "example_app",

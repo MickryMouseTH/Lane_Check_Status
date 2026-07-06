@@ -8,7 +8,7 @@
 # enables it on boot, and starts it. MySQL must be reachable per the config.
 set -euo pipefail
 
-INSTALL_DIR="/opt/lane_check_server"
+INSTALL_DIR="/home/lane_check_server"
 SERVICE_NAME="lane_check_server.service"
 SRC_DIR="$(cd "$(dirname "$0")" && pwd)"
 
@@ -38,8 +38,41 @@ fi
 echo "[install] Ensuring manual import folders ..."
 mkdir -p "$INSTALL_DIR/manual/processed" "$INSTALL_DIR/manual/failed"
 
-echo "[install] Installing systemd unit ..."
-install -m 0644 "$SRC_DIR/$SERVICE_NAME" "/etc/systemd/system/$SERVICE_NAME"
+echo "[install] Installing systemd unit (pointing it at $INSTALL_DIR) ..."
+# Generate the unit inline so the deploy bundle only needs the dist binary
+# (no separate .service file to copy). Paths point at $INSTALL_DIR.
+cat > "/etc/systemd/system/$SERVICE_NAME" <<EOF
+[Unit]
+Description=Lane_Check_Server - RabbitMQ to MySQL ingestion for Lane_Check_Status
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=$INSTALL_DIR
+ExecStart=$INSTALL_DIR/Lane_Check_Server
+
+# Secret key for LogLibrary (decrypts RabbitMQ.Password / MySQL.Password).
+# After the first run:
+#   echo "LOGLIB_KEY=<key>" | sudo tee $INSTALL_DIR/lane_check_server.env
+EnvironmentFile=-$INSTALL_DIR/lane_check_server.env
+
+User=root
+Group=root
+
+Restart=always
+RestartSec=10
+StartLimitIntervalSec=300
+StartLimitBurst=10
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=lane_check_server
+
+[Install]
+WantedBy=multi-user.target
+EOF
+chmod 0644 "/etc/systemd/system/$SERVICE_NAME"
 
 systemctl daemon-reload
 systemctl enable "$SERVICE_NAME"

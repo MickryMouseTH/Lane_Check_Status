@@ -28,5 +28,9 @@ manual/
 lane_check_status.env
 .env
 
+# Encryption key files — auto-generated per program on first run.
+# Losing these makes ENC: secrets unrecoverable; back them up out-of-band.
+*.key
+
 # OS junk
 .DS_Store
