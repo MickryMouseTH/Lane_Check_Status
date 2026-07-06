@@ -7,6 +7,17 @@ set -euo pipefail
 
 cd "$(dirname "$0")"
 
+# LogLibrary.py is maintained in the repo ROOT and shared with the collector.
+# Sync the canonical copy here before building so the server can never ship a
+# stale LogLibrary (which previously caused an ImportError on startup).
+ROOT_LOGLIB="../LogLibrary.py"
+if [ -f "$ROOT_LOGLIB" ]; then
+    echo "[build] Syncing LogLibrary.py from repo root ..."
+    cp "$ROOT_LOGLIB" ./LogLibrary.py
+else
+    echo "[build] WARNING: $ROOT_LOGLIB not found; using existing Server/LogLibrary.py." >&2
+fi
+
 PYTHON="${PYTHON:-python3}"
 VENV_DIR=".buildenv"
 
