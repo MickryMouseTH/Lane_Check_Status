@@ -297,6 +297,39 @@ def _generated_key_hint(fernet):
     return f'    export {_KEY_ENV}={key_str}\n'
 
 
+def secret_looks_undecrypted(value):
+    """True if a secret still carries the ENC: marker at runtime.
+
+    At runtime `Load_Config` decrypts every secret, so a value that STILL begins
+    with ``ENC:`` means decryption failed (wrong or missing key). This happens
+    when the ``LOGLIB_KEY`` env var / ``<program>.key`` file the value was
+    encrypted with is gone or changed — most commonly after a reboot with the key
+    only in the login shell, or after moving the binary without its ``.key`` file.
+    Callers use this right before authenticating so the cause is logged loudly
+    instead of surfacing as an opaque auth failure.
+    """
+    return isinstance(value, str) and value.startswith(_ENC_PREFIX)
+
+
+def warn_if_undecrypted(logger, label, value):
+    """Log a clear error if `value` is a still-encrypted secret; return that bool.
+
+    `logger` is the loguru-style logger used by the caller (``{}`` formatting).
+    `label` names the secret in the message (e.g. "RabbitMQ Password").
+    """
+    if secret_looks_undecrypted(value):
+        logger.error(
+            "{} is still encrypted (value starts with '{}') — the encryption key "
+            "did not decrypt it. The {} env var or the '<program>.key' file is "
+            "missing or changed (typically after a reboot, or after moving the "
+            "binary without its .key file). Authentication will fail until the "
+            "key is restored.",
+            label, _ENC_PREFIX, _KEY_ENV,
+        )
+        return True
+    return False
+
+
 def Load_Config(default_config, Program_Name):
     """Load or create a JSON config for the application.
 
@@ -337,18 +370,22 @@ def Load_Config(default_config, Program_Name):
         if not isinstance(file_config, dict):
             raise ValueError('Config root must be a JSON object.')
     except (json.JSONDecodeError, ValueError, OSError) as exc:
-        # Don't take the host application down because of a bad config file;
-        # back up the broken file and continue with defaults.
+        # Leave the bad file EXACTLY where it is — do not rename it to .bak or
+        # overwrite it with a fresh default config. Silently regenerating the
+        # file used to hide the real problem (and discard the operator's
+        # settings). Instead make the error loud (stderr → journald, greppable
+        # via the "CONFIG ERROR" marker) and run with in-memory defaults for this
+        # run only. Nothing is written to disk, so the broken file stays put for
+        # the operator to inspect and fix.
         sys.stderr.write(
-            f'[LogLibrary] Failed to read config "{config_path}" ({exc}); '
-            f'using default configuration.\n'
+            f'[LogLibrary] CONFIG ERROR: could not load "{config_path}" '
+            f'({type(exc).__name__}: {exc}). The file was left UNTOUCHED — fix it '
+            f'and restart. Running with in-memory defaults for now; NO config file '
+            f'was created or overwritten.\n'
         )
-        try:
-            if os.path.exists(config_path):
-                os.replace(config_path, f'{config_path}.bak')
-        except OSError:
-            pass
-        return _apply_secret_encryption(dict(default_config), config_path, force_write=True, key_path=key_path)
+        # Return raw defaults: runtime needs plaintext values and we deliberately
+        # avoid touching the .key file or the config on disk in this error path.
+        return dict(default_config)
 
     # Merge file values over the defaults so missing keys are backfilled.
     config = dict(default_config)

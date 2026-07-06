@@ -45,5 +45,12 @@
         "Connection_Timeout": 10,
         "Reconnect_Delay": 5,
         "Table_Prefix": ""
+    },
+
+    "Retention": {
+        "Enable": 1,
+        "Retention_Days": 30,
+        "Cleanup_Interval_Hours": 24,
+        "Run_On_Startup": 1
     }
 }

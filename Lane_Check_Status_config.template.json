@@ -75,6 +75,45 @@
         ]
     },
 
+    "Ping": {
+        "Enable": 1,
+        "Interval_Cycles": 1,
+        "Count": 1,
+        "Timeout_Seconds": 2,
+        "Hosts": [
+            { "Hostname": "Gateway", "Address": "192.168.1.1" },
+            { "Hostname": "Google DNS", "Address": "8.8.8.8" }
+        ]
+    },
+
+    "USB": {
+        "Enable": 1,
+        "Command": "usb-devices",
+        "Interval_Cycles": 5,
+        "Timeout_Seconds": 10,
+        "Devices": [
+            { "Name": "NFC Reader (SL600)", "VendorID": "0471", "ProductID": "a112" },
+            { "Name": "Receipt Printer (EPSON TM-T88VI)", "VendorID": "04b8", "ProductID": "0202" }
+        ]
+    },
+
+    "Http_Probe": {
+        "Enable": 1,
+        "Interval_Cycles": 15,
+        "Timeout_Seconds": 10,
+        "Endpoints": [
+            {
+                "Name": "RSE651",
+                "URL": "10.0.0.15:1337",
+                "Extract": {
+                    "serial_number": "Serialnumber:\\s*([^\\s<]+)",
+                    "mac": "MAC:\\s*([0-9A-Fa-f:]+)",
+                    "host": "Host:\\s*([^\\s<]+)"
+                }
+            }
+        ]
+    },
+
     "Programs": [
         {
             "Name": "example_app",

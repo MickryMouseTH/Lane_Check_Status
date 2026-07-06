@@ -141,6 +141,55 @@ CREATE TABLE IF NOT EXISTS `services_process` (
     PRIMARY KEY (timestamp_utc, hostname, name)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
+-- Ping reachability + latency -> one row per pinged address per cycle.
+CREATE TABLE IF NOT EXISTS `ping` (
+    timestamp_utc       DATETIME(6)  NOT NULL,
+    hostname            VARCHAR(150) NOT NULL,
+    address             VARCHAR(255) NOT NULL,
+    name                VARCHAR(150),
+    reachable           TINYINT,
+    rtt_ms              DOUBLE,
+    packet_loss_percent DOUBLE,
+    ok                  TINYINT,
+    error               VARCHAR(255),
+    collected_at        VARCHAR(40),
+    PRIMARY KEY (timestamp_utc, hostname, address)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- USB device presence -> one row per expected device (by name) per cycle.
+CREATE TABLE IF NOT EXISTS `usb` (
+    timestamp_utc DATETIME(6)  NOT NULL,
+    hostname      VARCHAR(150) NOT NULL,
+    name          VARCHAR(150) NOT NULL,
+    vendor_id     VARCHAR(8),
+    product_id    VARCHAR(8),
+    present       TINYINT,
+    count         INT,
+    manufacturer  VARCHAR(255),
+    product       VARCHAR(255),
+    serial        VARCHAR(255),
+    ok            TINYINT,
+    error         VARCHAR(255),
+    collected_at  VARCHAR(40),
+    PRIMARY KEY (timestamp_utc, hostname, name)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- HTTP probe (curl a device status page + extract fields) -> one row per endpoint (by name) per cycle.
+CREATE TABLE IF NOT EXISTS `http_probe` (
+    timestamp_utc  DATETIME(6)  NOT NULL,
+    hostname       VARCHAR(150) NOT NULL,
+    name           VARCHAR(150) NOT NULL,
+    url            VARCHAR(512),
+    ok             TINYINT,
+    status_code    INT,
+    response_ms    DOUBLE,
+    fields         JSON,
+    fields_missing JSON,
+    error          VARCHAR(255),
+    collected_at   VARCHAR(40),
+    PRIMARY KEY (timestamp_utc, hostname, name)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
 -- One row per monitored program per cycle.
 CREATE TABLE IF NOT EXISTS `program_logs` (
     timestamp_utc    DATETIME(6)  NOT NULL,

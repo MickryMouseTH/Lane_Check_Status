@@ -24,13 +24,16 @@ import system_metrics
 import smart_collector
 import raid_collector
 import service_collector
+import ping_collector
+import usb_collector
+import http_collector
 import log_collector
 from mq_publisher import MQPublisher
 from json_archive import JsonArchive
 
 # ----------------------- Configuration Values -----------------------
 Program_Name = "Lane_Check_Status"   # Program name for identification and logging.
-Program_Version = "1.1.0"             # Program version used for file naming and logging.
+Program_Version = "1.3.0"             # Program version used for file naming and logging.
 # ---------------------------------------------------------------------
 
 default_config = {
@@ -138,6 +141,41 @@ default_config = {
         "Processes": [],                # e.g. [{"Name": "tct_app", "Pattern": "TCT_App.exe"}]
     },
 
+    # ---- Ping / reachability checks ----
+    # Pings each host and records round-trip time (rtt_ms) + packet loss. Cheap;
+    # by default runs every cycle so latency is sampled at the loop interval.
+    "Ping": {
+        "Enable": 1,
+        "Interval_Cycles": 1,           # check every Nth cycle (1 = every cycle).
+        "Count": 1,                     # ICMP echoes per host (averaged into rtt_ms).
+        "Timeout_Seconds": 2,           # per-reply timeout.
+        "Hosts": [],                    # e.g. [{"Hostname": "Gateway", "Address": "192.168.1.1"}]
+    },
+
+    # ---- USB device presence checks ----
+    # Verifies expected USB peripherals are enumerated on the bus, matched by
+    # Vendor:Product ID (find them with `usb-devices` or `lsusb`). USB topology is
+    # static, so probe it infrequently and cache between refreshes (like SMART).
+    "USB": {
+        "Enable": 1,
+        "Command": "usb-devices",       # enumeration tool (falls back to lsusb).
+        "Interval_Cycles": 5,           # check every Nth cycle.
+        "Timeout_Seconds": 10,
+        "Devices": [],                  # e.g. [{"Name": "NFC Reader", "VendorID": "0471", "ProductID": "a112"}]
+    },
+
+    # ---- HTTP probes (curl a device status page and extract fields) ----
+    # For appliances exposing an HTTP status page. Each endpoint pulls out fields
+    # via regex (serial number, MAC, ...). Identity data is static, so probe it
+    # infrequently and cache between refreshes (like SMART).
+    "Http_Probe": {
+        "Enable": 1,
+        "Interval_Cycles": 15,          # check every Nth cycle.
+        "Timeout_Seconds": 10,
+        "Endpoints": [],                # e.g. [{"Name": "RSE651", "URL": "10.0.0.15:1337",
+                                        #        "Extract": {"serial_number": "Serialnumber:\\s*(\\S+)"}}]
+    },
+
     # ---- Application logs to tail & filter ----
     # Log_Path supports date tokens: yyyy yy mm dd HH MM SS
     #   e.g. "/tct/yyyy-mm/tct_app_ddmmyy.log" -> "/tct/2026-06/tct_app_230626.log"
@@ -199,7 +237,8 @@ def apply_low_impact(logger, config):
             logger.debug("ionice not available; skipping I/O priority tuning.")
 
 
-def build_payload(logger, config, log_state, smart_cache, raid_cache, service_cache):
+def build_payload(logger, config, log_state, smart_cache, raid_cache, service_cache,
+                  ping_cache, usb_cache, http_cache):
     """Collect every metric and assemble the JSON-ready payload dict."""
     hostname = config.get("Hostname_Override") or socket.gethostname()
     now = datetime.now(timezone.utc)
@@ -283,6 +322,64 @@ def build_payload(logger, config, log_state, smart_cache, raid_cache, service_ca
         logger.debug("Service collection disabled in config.")
         payload["services"] = {}
 
+    # 2d) Ping / reachability — records round-trip time per host. Cheap; cached
+    #     on its own cadence (usually every cycle) so latency is sampled often.
+    ping_cfg = config.get("Ping", {})
+    if _truthy(ping_cfg.get("Enable", 1)):
+        if ping_cache.get("due"):
+            ping_cache["data"] = ping_collector.collect_ping(
+                logger,
+                ping_cfg.get("Hosts", []),
+                count=int(ping_cfg.get("Count", 1)),
+                timeout=int(ping_cfg.get("Timeout_Seconds", 2)),
+            )
+            ping_cache["collected_at"] = now.isoformat()
+        else:
+            logger.debug("Ping not due this cycle; reusing cached result.")
+        payload["ping"] = ping_cache.get("data", [])
+        payload["ping_collected_at"] = ping_cache.get("collected_at")
+    else:
+        logger.debug("Ping collection disabled in config.")
+        payload["ping"] = []
+
+    # 2e) USB device presence — static-ish topology, cached like SMART.
+    usb_cfg = config.get("USB", {})
+    if _truthy(usb_cfg.get("Enable", 1)):
+        if usb_cache.get("due"):
+            usb_cache["data"] = usb_collector.collect_usb(
+                logger,
+                usb_cfg.get("Devices", []),
+                command=usb_cfg.get("Command", "usb-devices"),
+                timeout=int(usb_cfg.get("Timeout_Seconds", 10)),
+            )
+            usb_cache["collected_at"] = now.isoformat()
+        else:
+            logger.debug("USB not due this cycle; reusing cached result.")
+        payload["usb"] = usb_cache.get("data", [])
+        payload["usb_collected_at"] = usb_cache.get("collected_at")
+    else:
+        logger.debug("USB collection disabled in config.")
+        payload["usb"] = []
+
+    # 2f) HTTP probes — curl device status pages and extract fields (serial, MAC,
+    #     ...). Static-ish identity data, cached like SMART.
+    http_cfg = config.get("Http_Probe", {})
+    if _truthy(http_cfg.get("Enable", 1)):
+        if http_cache.get("due"):
+            http_cache["data"] = http_collector.collect_http(
+                logger,
+                http_cfg.get("Endpoints", []),
+                timeout=int(http_cfg.get("Timeout_Seconds", 10)),
+            )
+            http_cache["collected_at"] = now.isoformat()
+        else:
+            logger.debug("HTTP probe not due this cycle; reusing cached result.")
+        payload["http_probe"] = http_cache.get("data", [])
+        payload["http_probe_collected_at"] = http_cache.get("collected_at")
+    else:
+        logger.debug("HTTP probe collection disabled in config.")
+        payload["http_probe"] = []
+
     # 3) Program logs (offset state is mutated in place)
     payload["program_logs"] = log_collector.collect_program_logs(
         logger, config.get("Programs", []), log_state
@@ -292,12 +389,12 @@ def build_payload(logger, config, log_state, smart_cache, raid_cache, service_ca
     return payload
 
 
-def run_once(logger, config, publisher, archive, log_state, log_state_path, smart_cache, raid_cache, service_cache):
+def run_once(logger, config, publisher, archive, log_state, log_state_path, smart_cache, raid_cache, service_cache, ping_cache, usb_cache, http_cache):
     """Execute a single collection-and-publish cycle."""
     logger.info("=== Collection cycle started ===")
     start = time.monotonic()
 
-    payload = build_payload(logger, config, log_state, smart_cache, raid_cache, service_cache)
+    payload = build_payload(logger, config, log_state, smart_cache, raid_cache, service_cache, ping_cache, usb_cache, http_cache)
     log_collector.save_state(logger, log_state_path, log_state)
 
     # 4a) Archive a local copy of the payload (independent of MQ delivery),
@@ -332,11 +429,17 @@ def main():
     smart_interval_cycles = max(1, int(config.get("Smart", {}).get("Interval_Cycles", 15)))
     raid_interval_cycles = max(1, int(config.get("Raid", {}).get("Interval_Cycles", 60)))
     service_interval_cycles = max(1, int(config.get("Services", {}).get("Interval_Cycles", 1)))
+    ping_interval_cycles = max(1, int(config.get("Ping", {}).get("Interval_Cycles", 1)))
+    usb_interval_cycles = max(1, int(config.get("USB", {}).get("Interval_Cycles", 5)))
+    http_interval_cycles = max(1, int(config.get("Http_Probe", {}).get("Interval_Cycles", 15)))
     log_state_path = os.path.join(script_dir, f"{Program_Name}_log_state.json")
     log_state = log_collector.load_state(logger, log_state_path)
     smart_cache = {"data": [], "collected_at": None, "due": True}
     raid_cache = {"data": {}, "collected_at": None, "due": True}
     service_cache = {"data": {}, "collected_at": None, "due": True}
+    ping_cache = {"data": [], "collected_at": None, "due": True}
+    usb_cache = {"data": [], "collected_at": None, "due": True}
+    http_cache = {"data": [], "collected_at": None, "due": True}
 
     archive = JsonArchive(
         logger,
@@ -375,8 +478,13 @@ def main():
             raid_cache["due"] = (cycle % raid_interval_cycles == 0)
             # Service health flaps; refresh on its own (usually faster) cadence.
             service_cache["due"] = (cycle % service_interval_cycles == 0)
+            # Ping latency sampled frequently; USB topology rarely changes.
+            ping_cache["due"] = (cycle % ping_interval_cycles == 0)
+            usb_cache["due"] = (cycle % usb_interval_cycles == 0)
+            # HTTP identity data (serial/MAC) is static; probe infrequently.
+            http_cache["due"] = (cycle % http_interval_cycles == 0)
             try:
-                run_once(logger, config, publisher, archive, log_state, log_state_path, smart_cache, raid_cache, service_cache)
+                run_once(logger, config, publisher, archive, log_state, log_state_path, smart_cache, raid_cache, service_cache, ping_cache, usb_cache, http_cache)
             except Exception as exc:
                 # One bad cycle must not kill the daemon.
                 logger.exception("Unhandled error during collection cycle: {}", exc)

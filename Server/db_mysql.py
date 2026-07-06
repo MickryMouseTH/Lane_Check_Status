@@ -15,6 +15,9 @@ Tables (with optional Table_Prefix):
     smart_attributes    (PK: timestamp_utc, hostname, device, attr_id)
     services_systemd    (PK: timestamp_utc, hostname, unit)
     services_process    (PK: timestamp_utc, hostname, name)
+    ping                (PK: timestamp_utc, hostname, address)
+    usb                 (PK: timestamp_utc, hostname, name)
+    http_probe          (PK: timestamp_utc, hostname, name)
     program_logs        (PK: timestamp_utc, hostname, name)
     program_log_lines   (PK: timestamp_utc, hostname, program_name, line_no)
 
@@ -22,13 +25,24 @@ Rows are written with INSERT ... ON DUPLICATE KEY UPDATE so re-delivered
 messages (RabbitMQ is at-least-once) update in place instead of erroring.
 """
 import json
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 try:
     import pymysql
     _HAS_PYMYSQL = True
 except ImportError:
     _HAS_PYMYSQL = False
+
+from LogLibrary import warn_if_undecrypted
+
+
+# Every per-cycle table carries a timestamp_utc column, so retention pruning is a
+# uniform DELETE across each of them. Order does not matter (no cross-table FKs).
+_ALL_TABLES = (
+    "host", "cpu", "memory", "disk_usage", "smart", "smart_attributes",
+    "raid", "services_systemd", "services_process", "ping", "usb",
+    "http_probe", "program_logs", "program_log_lines",
+)
 
 
 def _parse_ts(ts):
@@ -77,6 +91,7 @@ class Database:
         if not _HAS_PYMYSQL:
             return False
 
+        warn_if_undecrypted(self.logger, "MySQL Password", self.cfg.get("Password", ""))
         try:
             self._conn = pymysql.connect(
                 host=self.cfg.get("Host", "localhost"),
@@ -240,6 +255,52 @@ class Database:
                 PRIMARY KEY (timestamp_utc, hostname, name)
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4""",
 
+            f"""CREATE TABLE IF NOT EXISTS {self._t('ping')} (
+                timestamp_utc        DATETIME(6)  NOT NULL,
+                hostname             VARCHAR(150) NOT NULL,
+                address              VARCHAR(255) NOT NULL,
+                name                 VARCHAR(150),
+                reachable            TINYINT,
+                rtt_ms               DOUBLE,
+                packet_loss_percent  DOUBLE,
+                ok                   TINYINT,
+                error                VARCHAR(255),
+                collected_at         VARCHAR(40),
+                PRIMARY KEY (timestamp_utc, hostname, address)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4""",
+
+            f"""CREATE TABLE IF NOT EXISTS {self._t('usb')} (
+                timestamp_utc  DATETIME(6)  NOT NULL,
+                hostname       VARCHAR(150) NOT NULL,
+                name           VARCHAR(150) NOT NULL,
+                vendor_id      VARCHAR(8),
+                product_id     VARCHAR(8),
+                present        TINYINT,
+                count          INT,
+                manufacturer   VARCHAR(255),
+                product        VARCHAR(255),
+                serial         VARCHAR(255),
+                ok             TINYINT,
+                error          VARCHAR(255),
+                collected_at   VARCHAR(40),
+                PRIMARY KEY (timestamp_utc, hostname, name)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4""",
+
+            f"""CREATE TABLE IF NOT EXISTS {self._t('http_probe')} (
+                timestamp_utc  DATETIME(6)  NOT NULL,
+                hostname       VARCHAR(150) NOT NULL,
+                name           VARCHAR(150) NOT NULL,
+                url            VARCHAR(512),
+                ok             TINYINT,
+                status_code    INT,
+                response_ms    DOUBLE,
+                fields         JSON,
+                fields_missing JSON,
+                error          VARCHAR(255),
+                collected_at   VARCHAR(40),
+                PRIMARY KEY (timestamp_utc, hostname, name)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4""",
+
             f"""CREATE TABLE IF NOT EXISTS {self._t('program_logs')} (
                 timestamp_utc     DATETIME(6)  NOT NULL,
                 hostname          VARCHAR(150) NOT NULL,
@@ -274,6 +335,56 @@ class Database:
             self.logger.error("Failed to ensure schema: {}", exc)
             self._conn.rollback()
             return False
+
+    # ----------------------------- Retention -----------------------------
+    def purge_old(self, retention_days):
+        """Delete rows older than ``retention_days`` across all tables.
+
+        Keyed on ``timestamp_utc`` (the UTC collection time). Each table is
+        pruned in its own DELETE within a single transaction. A value of 0 (or
+        less) disables pruning and is a no-op.
+
+        Returns the total number of rows deleted, or -1 on failure (so a caller
+        can log/alert without the periodic cleaner crashing).
+        """
+        try:
+            days = int(retention_days)
+        except (TypeError, ValueError):
+            days = 0
+        if days <= 0:
+            self.logger.debug("DB retention disabled (Retention_Days={}).", retention_days)
+            return 0
+
+        if not self.connect():
+            self.logger.warning("DB retention: MySQL unreachable; skipping this run.")
+            return -1
+
+        cutoff = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=days)
+        total = 0
+        try:
+            with self._conn.cursor() as cur:
+                for table in _ALL_TABLES:
+                    cur.execute(
+                        f"DELETE FROM {self._t(table)} WHERE timestamp_utc < %s",
+                        (cutoff,),
+                    )
+                    deleted = cur.rowcount or 0
+                    if deleted:
+                        self.logger.debug("DB retention: {} -> {} row(s) purged.", table, deleted)
+                        total += deleted
+            self._conn.commit()
+            self.logger.info(
+                "DB retention: purged {} row(s) older than {} day(s) (before {}Z).",
+                total, days, cutoff.isoformat(),
+            )
+            return total
+        except Exception as exc:
+            self.logger.error("DB retention purge failed: {}", exc)
+            try:
+                self._conn.rollback()
+            except Exception:
+                pass
+            return -1
 
     # ------------------------------ Storage ------------------------------
     @staticmethod
@@ -312,6 +423,12 @@ class Database:
                 self._store_raid(cur, ts, host, payload.get("raid", {}) or {},
                                  payload.get("raid_collected_at"))
                 self._store_services(cur, ts, host, payload.get("services", {}) or {})
+                self._store_ping(cur, ts, host, payload.get("ping", []) or [],
+                                 payload.get("ping_collected_at"))
+                self._store_usb(cur, ts, host, payload.get("usb", []) or [],
+                                payload.get("usb_collected_at"))
+                self._store_http_probe(cur, ts, host, payload.get("http_probe", []) or [],
+                                       payload.get("http_probe_collected_at"))
                 self._store_program_logs(cur, ts, host, payload.get("program_logs", []) or [])
             self._conn.commit()
             self.logger.info("Stored payload for {} @ {} into MySQL.", host, ts.isoformat())
@@ -430,6 +547,50 @@ class Database:
                  p.get("count"), json.dumps(pids) if pids is not None else None,
                  p.get("rss_kb"), p.get("vms_kb"), p.get("num_threads"),
                  p.get("uptime_seconds"), self._bool_int(p.get("ok")), p.get("error")])
+
+    def _store_ping(self, cur, ts, host, pings, collected_at):
+        for p in pings:
+            address = p.get("address")
+            if not address:
+                # Misconfigured host with no address — nothing stable to key on.
+                continue
+            self._upsert(cur, "ping",
+                ["timestamp_utc", "hostname", "address", "name", "reachable",
+                 "rtt_ms", "packet_loss_percent", "ok", "error", "collected_at"],
+                [ts, host, address, p.get("hostname"),
+                 self._bool_int(p.get("reachable")), p.get("rtt_ms"),
+                 p.get("packet_loss_percent"), self._bool_int(p.get("ok")),
+                 p.get("error"), collected_at])
+
+    def _store_usb(self, cur, ts, host, usb_devices, collected_at):
+        for d in usb_devices:
+            name = d.get("name")
+            if not name:
+                continue
+            self._upsert(cur, "usb",
+                ["timestamp_utc", "hostname", "name", "vendor_id", "product_id",
+                 "present", "count", "manufacturer", "product", "serial", "ok",
+                 "error", "collected_at"],
+                [ts, host, name, d.get("vendor_id"), d.get("product_id"),
+                 self._bool_int(d.get("present")), d.get("count"),
+                 d.get("manufacturer"), d.get("product"), d.get("serial"),
+                 self._bool_int(d.get("ok")), d.get("error"), collected_at])
+
+    def _store_http_probe(self, cur, ts, host, probes, collected_at):
+        for p in probes:
+            name = p.get("name")
+            if not name:
+                continue
+            fields = p.get("fields")
+            missing = p.get("fields_missing")
+            self._upsert(cur, "http_probe",
+                ["timestamp_utc", "hostname", "name", "url", "ok", "status_code",
+                 "response_ms", "fields", "fields_missing", "error", "collected_at"],
+                [ts, host, name, p.get("url"), self._bool_int(p.get("ok")),
+                 p.get("status_code"), p.get("response_ms"),
+                 json.dumps(fields) if fields is not None else None,
+                 json.dumps(missing) if missing is not None else None,
+                 p.get("error"), collected_at])
 
     def _store_program_logs(self, cur, ts, host, programs):
         for p in programs:

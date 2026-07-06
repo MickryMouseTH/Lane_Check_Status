@@ -34,6 +34,10 @@
 | `system_metrics.py` | CPU / RAM / Disk usage (ใช้ `psutil`) |
 | `smart_collector.py` | smartmontools ทุก disk (`smartctl -j`, scan + per-device summary) |
 | `raid_collector.py` | RAID metadata ผ่าน `dmraid -n` (ATARAID/fakeRAID/BIOS RAID), cache แบบเดียวกับ SMART |
+| `service_collector.py` | สุขภาพ systemd units (`systemctl show`) + named process (match cmdline ด้วย psutil) |
+| `ping_collector.py` | ping ราย host เก็บ `rtt_ms`(latency)+packet loss, cache ตาม `Ping.Interval_Cycles` |
+| `usb_collector.py` | เช็คอุปกรณ์ USB ที่ควรมี match VID:PID (parse `usb-devices`/`lsusb`), cache ตาม `USB.Interval_Cycles` |
+| `http_collector.py` | curl (HTTP GET ผ่าน `urllib`) หน้า status ของอุปกรณ์ → ดึง field ตาม regex (`Http_Probe.Endpoints[].Extract`), cache ตาม `Http_Probe.Interval_Cycles` |
 | `log_collector.py` | tail+filter log ของแต่ละโปรแกรม, offset state, **date-token ในชื่อ path** |
 | `mq_publisher.py` | RabbitMQ publish + disk spool (store-and-forward) ใช้ `pika` |
 | `json_archive.py` | เก็บสำเนา JSON เป็นไฟล์รายวัน + zip รวมรายวันตอน 00:01 + retention |
@@ -84,9 +88,13 @@
 
 ## รูปแบบ JSON ที่ส่ง
 ดูตัวอย่างเต็มใน `sample_output.json`. คีย์หลัก:
-`program, version, hostname, timestamp_utc, timestamp_epoch, os, cpu, memory, disk_usage[], smart[], smart_collected_at, raid, raid_collected_at, program_logs[]`
+`program, version, hostname, timestamp_utc, timestamp_epoch, os, cpu, memory, disk_usage[], smart[], smart_collected_at, raid, raid_collected_at, services, services_collected_at, ping[], ping_collected_at, usb[], usb_collected_at, http_probe[], http_probe_collected_at, program_logs[]`
 - ค่าที่อ่านไม่ได้ (เช่น path หาย / smartctl fail) จะใส่ฟิลด์ `error` ราย item แทนที่จะล้มทั้งรอบ
 - `raid` = ผล `dmraid -n`: `available`, `raid_detected`, `command`, `returncode`, `output[]` (+ `stderr`/`error` เมื่อมี); ไม่มี `dmraid` → `available=false` เฉยๆ ไม่ error
+- `services` = สุขภาพ service/process: `systemd[]` (systemctl show) + `processes[]` (match cmdline) ทุก entry มี `ok`
+- `ping[]` = ผล ping ราย host: `hostname`(label), `address`, `reachable`, **`rtt_ms`**(latency), `packet_loss_percent`, `ok` — unreachable → `rtt_ms=null`
+- `usb[]` = เช็คอุปกรณ์ USB ที่ควรมี จับคู่ด้วย **VID:PID** (`vendor_id`/`product_id`): `present`, `count`, `manufacturer`/`product`/`serial`, `ok` (enumerate `usb-devices` → fallback `lsusb`)
+- `http_probe[]` = curl หน้า status ของอุปกรณ์ (HTTP GET ผ่าน `urllib`) แล้วดึง field ตาม **regex** ใน config (`Extract: {ชื่อ→regex}`): `url`, `status_code`, `response_ms`, `fields{}` (คีย์ dynamic เก็บเป็น JSON), `fields_missing`, `ok`(=2xx) — ใช้ดึง `serial_number`/`mac` จาก Q-Free RSE
 - `program_logs[]` มี `log_path_pattern` (ดิบ) และ `log_path` (หลังแทนวันที่), `matched_count`, `lines[]`
 
 ## การ build
@@ -135,6 +143,8 @@ sudo journalctl -u lane_check_status -f   # ดู log realtime
 | `db_mysql.py` | สร้าง schema อัตโนมัติ + แตก payload ลงตาราง (ใช้ `INSERT ... ON DUPLICATE KEY UPDATE`) |
 | `json_archive.py` | (copy) เก็บไฟล์ JSON ที่รับมา เป็น `.json` รายวัน + zip รายวัน + retention ; ตั้งชื่อไฟล์ตาม **hostname** ต้นทาง |
 | `manual_import.py` | **fallback เมื่อ MQ พัง**: thread เฝ้าโฟลเดอร์ `manual/` import `.json`/`.zip` เข้า MySQL (DB connection แยกของตัวเอง) |
+| `db_cleanup.py` | thread ลบข้อมูลเกิน retention (`purge_old`) ทุก `Cleanup_Interval_Hours` (DB connection แยก) |
+| `seed_demo_data.py` | **dev util**: generate ข้อมูลจำลองครบทุก section (หลาย host/หลายวัน) ผ่าน `store_payload()` สำหรับทำ/ทดสอบ Dashboard ; idempotent (upsert), `--hosts/--days/--step-minutes` |
 | `schema.sql` | สคีมาอ้างอิง (โปรแกรมสร้างเองตอนรัน) |
 | `requirements.txt` / `build.sh` | build `--onefile` (ใช้ **PyMySQL**) |
 | `lane_check_server.service` | systemd unit |
@@ -148,8 +158,15 @@ sudo journalctl -u lane_check_status -f   # ดู log realtime
 - `smart` PK(timestamp_utc, hostname, **device**) — model/serial/fw, smart_passed, temp, poh, error
 - `smart_attributes` PK(timestamp_utc, hostname, **device, attr_id**) — name/value/worst/thresh/raw...
 - `raid` PK(timestamp_utc, hostname) — available, raid_detected, command, returncode, output(JSON), stderr, error, collected_at
+- `services_systemd` PK(timestamp_utc, hostname, **unit**) — load/active/sub_state, enabled, main_pid, ok
+- `services_process` PK(timestamp_utc, hostname, **name**) — pattern, running, count, pids(JSON), rss/vms_kb, num_threads, uptime, ok
+- `ping` PK(timestamp_utc, hostname, **address**) — name, reachable, rtt_ms, packet_loss_percent, ok, collected_at
+- `usb` PK(timestamp_utc, hostname, **name**) — vendor_id, product_id, present, count, manufacturer, product, serial, ok, collected_at
+- `http_probe` PK(timestamp_utc, hostname, **name**) — url, ok, status_code, response_ms, **fields(JSON)**, fields_missing(JSON), error, collected_at ; ดึง serial ด้วย `JSON_EXTRACT(fields,'$.serial_number')`
 - `program_logs` PK(timestamp_utc, hostname, **name**) — path, matched_count...
 - `program_log_lines` PK(timestamp_utc, hostname, **program_name, line_no**) — line
+
+**DB retention (ลบข้อมูลเก่า)**: `db_cleanup.py` = thread แยก (DB connection ของตัวเอง) เรียก `db_mysql.purge_old(Retention_Days)` ลบทุกแถวที่ `timestamp_utc` เก่ากว่า N วัน จาก **ทุกตาราง** (`_ALL_TABLES`) ทุก `Cleanup_Interval_Hours` ชม. ; config `Retention.{Enable,Retention_Days,Cleanup_Interval_Hours,Run_On_Startup}` (default 30 วัน, ทุก 24 ชม., กวาดตอนสตาร์ท) ; MySQL ล่ม → ข้ามรอบแล้วลองใหม่ ไม่ล้ม server
 
 **เก็บไฟล์ JSON ที่รับ**: `Received_Files.{Enable,Directory,Retention_Days,Daily_Zip,Daily_Zip_Time}` — บันทึกทุก payload ที่รับเป็น `received/YYYY-MM-DD/<hostname>_...json` (zip รวมรายวัน + retention เหมือนฝั่ง collector) เก็บก่อนเขียน DB จึงไม่หายแม้ DB ล่ม
 
@@ -162,6 +179,17 @@ sudo journalctl -u lane_check_status -f   # ดู log realtime
 - ถ้า `Exchange=""` (default/nameless exchange) RabbitMQ route ตาม **ชื่อ queue** → publisher ต้องส่งด้วย routing_key = **ชื่อ Queue** ไม่ใช่ `Routing_Key` (ถ้าใช้ `Routing_Key="system.status"` ที่ไม่ตรง queue `system_status` ข้อความจะ unroutable หายเลย)
 - `mq_publisher` แก้แล้ว: `Exchange==""` → ใช้ `Queue` เป็น routing key ; `Exchange` มีค่า → ใช้ `Routing_Key`
 - collector / consumer / server ใช้ Queue เดียวกัน = `system_status`
+
+## เพิ่ม payload section ใหม่ ต้องแตะไฟล์ไหนบ้าง (checklist — สำคัญ)
+การเพิ่ม collector/section หนึ่งอัน กระจายหลายไฟล์ ลืมง่าย:
+1. `xxx_collector.py` — ตัว collector (คืน dict/list, **ห้าม raise**, เก็บ error ใน struct)
+2. `main.py` — (ก) import, (ข) เพิ่มใน `default_config`, (ค) `xxx_interval_cycles` + `xxx_cache` ใน `main()`, (ง) เพิ่มใน `build_payload()` (พร้อม due-cache), (จ) เพิ่ม arg ใน `build_payload`/`run_once` signature, (ฉ) ตั้ง `xxx_cache["due"]` ใน loop
+3. `Lane_Check_Status_config.json` + `.template.json` — เพิ่ม config block
+4. `Server/db_mysql.py` — CREATE TABLE ใน `ensure_schema`, `_store_xxx`, เรียกใน `store_payload`, เพิ่มชื่อตารางใน `_ALL_TABLES` (ให้ retention กวาดด้วย)
+5. `Server/schema.sql` — mirror CREATE TABLE
+6. `Lane_Check_Status.spec` (hiddenimports) + `Server/build.sh` (--hidden-import) — ถ้าเพิ่มไฟล์ .py ใหม่ (`--onefile` เก็บ import อัตโนมัติไม่ครบ)
+7. `sample_output.json`, `README.md`, `MEMORY.md` — เอกสาร
+> ถ้าลืมข้อ 4 → ข้อมูลไปถึง Rabbit แต่ server ทิ้ง (db_mysql ดึงเฉพาะ key ที่รู้จัก ไม่ error) → เงียบหาย
 
 ## TODO / ส่วนที่ยังขยายได้
 - [ ] ตัวอย่าง unit file ของ systemd

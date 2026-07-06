@@ -20,9 +20,10 @@ import json
 import sys
 import time
 
-from LogLibrary import Load_Config, Loguru_Logging, script_dir
+from LogLibrary import Load_Config, Loguru_Logging, script_dir, warn_if_undecrypted
 
 from db_mysql import Database
+from db_cleanup import RetentionCleaner
 from json_archive import JsonArchive
 from manual_import import ManualImporter
 
@@ -34,7 +35,7 @@ except ImportError:
 
 # ----------------------- Configuration Values -----------------------
 Program_Name = "Lane_Check_Server"
-Program_Version = "1.1.0"
+Program_Version = "1.2.0"
 # ---------------------------------------------------------------------
 
 default_config = {
@@ -91,6 +92,15 @@ default_config = {
         "Reconnect_Delay": 5,
         "Table_Prefix": "",
     },
+
+    # ---- DB retention (periodically delete rows older than Retention_Days) ----
+    # Keeps the database bounded. Prunes every per-cycle table by timestamp_utc.
+    "Retention": {
+        "Enable": 1,
+        "Retention_Days": 30,          # delete DB rows older than this (0 = keep forever).
+        "Cleanup_Interval_Hours": 24,  # how often to run the purge.
+        "Run_On_Startup": 1,           # 1 = purge once at startup, then on interval.
+    },
 }
 
 
@@ -133,6 +143,7 @@ def _consume_forever(logger, config, db, archive):
 
     while True:
         try:
+            warn_if_undecrypted(logger, "RabbitMQ Password", rmq.get("Password", "guest"))
             credentials = pika.PlainCredentials(
                 rmq.get("Username", "guest"), rmq.get("Password", "guest")
             )
@@ -193,9 +204,14 @@ def main():
     manual = ManualImporter(logger, config.get("Manual_Import", {}), config.get("MySQL", {}), script_dir)
     manual.start()
 
+    # Start the DB retention cleaner (periodically prunes rows older than N days).
+    cleaner = RetentionCleaner(logger, config.get("Retention", {}), config.get("MySQL", {}))
+    cleaner.start()
+
     try:
         _consume_forever(logger, config, db, archive)
     finally:
+        cleaner.stop()
         manual.stop()
         db.close()
         logger.info("Lane_Check_Server stopped.")

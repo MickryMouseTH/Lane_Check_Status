@@ -30,6 +30,7 @@ pyinstaller --clean --noconfirm --onefile \
     --name Lane_Check_Server \
     --paths . \
     --hidden-import db_mysql \
+    --hidden-import db_cleanup \
     --hidden-import json_archive \
     --hidden-import manual_import \
     --hidden-import LogLibrary \

@@ -22,6 +22,8 @@ try:
 except ImportError:  # allows the module to import even before deps are installed
     _HAS_PIKA = False
 
+from LogLibrary import warn_if_undecrypted
+
 
 class MQPublisher:
     """Publish JSON messages to RabbitMQ, spooling to disk on failure."""
@@ -69,6 +71,7 @@ class MQPublisher:
         password = self.cfg.get("Password", "guest")
         timeout = int(self.cfg.get("Connection_Timeout", 10))
 
+        warn_if_undecrypted(self.logger, "RabbitMQ Password", password)
         self.logger.debug("Connecting to RabbitMQ at {}:{} vhost='{}' user='{}'.", host, port, vhost, username)
         try:
             credentials = pika.PlainCredentials(username, password)
@@ -95,7 +98,15 @@ class MQPublisher:
             self.logger.info("Connected to RabbitMQ at {}:{}.", host, port)
             return True
         except Exception as exc:  # pika raises a broad set of exceptions
-            self.logger.warning("RabbitMQ connection failed: {}", exc)
+            # Many pika connection errors (e.g. AMQPConnectionError on a refused
+            # TCP connect) stringify to an empty message, which produced a bare
+            # "RabbitMQ connection failed:" line. Always surface the exception
+            # class and fall back to repr() so the cause is never blank.
+            detail = str(exc).strip() or repr(exc)
+            self.logger.warning(
+                "RabbitMQ connection failed at {}:{} vhost='{}' user='{}' [{}]: {}",
+                host, port, vhost, username, type(exc).__name__, detail,
+            )
             self._connection = None
             self._channel = None
             return False
